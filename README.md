@@ -28,6 +28,7 @@
 - Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas.
 - Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
+- Permite añadir un mensaje opcional prellenado en cada enlace de WhatsApp del CSV; si el campo queda vacío, crea el enlace habitual sin texto.
 - Añade la columna `url_negocio` con el enlace a la ficha de cada negocio en Google Maps.
 - Abre WhatsApp Web para un teléfono con `Alt` + clic sobre el número en Google Maps.
 - Procesa y guarda los datos localmente en Chrome; no los envía a un servidor externo.
@@ -44,7 +45,7 @@
 6. Abre la extensión, escribe una búsqueda, por ejemplo “cafeterías en Palermo”, y haz clic en **Buscar y comenzar extracción**. Se abrirá Google Maps en una pestaña nueva y la extracción comenzará automáticamente.
 7. Puedes cambiar de pestaña mientras se extraen los resultados. Si la extracción se detiene, pulsa **Continuar extracción guardada** para retomar el progreso; si hace falta, la extensión volverá a abrir Maps en segundo plano.
 8. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
-9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades y elegir una ubicación objetivo.
+9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
 10. Haz clic en **Descargar CSV**.
 
 **Límite de fichas:** `0` no establece un máximo. La extensión sigue desplazándose mientras Maps cargue resultados; si no hay avance después de varios intentos, se pausa, guarda el progreso y permite continuar. No equivale a todos los negocios existentes en la zona.

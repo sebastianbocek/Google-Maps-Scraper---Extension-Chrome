@@ -24,6 +24,7 @@ header p.author a:hover { text-decoration: underline; }
 .log-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 11px; font-weight: 700; }
 .log-panel summary span { color: #0e7453; background: #eaf7f0; border-radius: 10px; padding: 3px 7px; font-size: 10px; }
 .log-panel textarea { display: block; width: 100%; height: 150px; margin-top: 8px; resize: vertical; border: 1px solid #e1e9e4; border-radius: 6px; background: #f8faf9; padding: 7px; color: #425b51; font: 10px/1.4 ui-monospace, Consolas, monospace; white-space: pre; overflow: auto; }
+.wa-message { width: 100%; resize: vertical; border: 1px solid #cbd8d0; border-radius: 7px; background: #fff; padding: 8px; color: #203c32; font-family: inherit; font-size: 12px; line-height: 1.45; }
 .log-panel button { width: 100%; margin-top: 7px; padding: 8px; font-size: 11px; }
 .options { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin: 14px 0 11px; gap: 4px; }
 .options label, .field-label { font-size: 12px; font-weight: 650; }

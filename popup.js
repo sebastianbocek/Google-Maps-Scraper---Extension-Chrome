@@ -4,13 +4,13 @@
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
   const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
-    "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount","websiteMode","phoneMode"];
+    "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
-  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:""};
+  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:""};
   let loading=true;
   const UNKNOWN="__unknown__";
   function sourceKey(url) {
@@ -57,7 +57,7 @@
       (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
   }
   function rowCsv(row) {
-    const link=util.whatsapp(row.phone||"",settings.country||"auto",row.address || rowLocation(row),state.searchUrl) || row.whatsappLink || "";
+    const link=util.whatsapp(row.phone||"",settings.country||"auto",row.address || rowLocation(row),state.searchUrl,settings.whatsappMessage) || row.whatsappLink || "";
     return [row.name,row.phone,row.rating,row.category,row.website,link,row.businessUrl||""];
   }
   function csvCell(value) {
@@ -131,6 +131,7 @@
     els.websiteMode.value=filters.websiteMode||"all";
     els.phoneMode.value=filters.phoneMode||"all";
     els.country.value=settings.country||"auto";
+    if(document.activeElement!==els.whatsappMessage) els.whatsappMessage.value=settings.whatsappMessage||"";
     if(document.activeElement!==els.searchQuery) els.searchQuery.value=settings.searchQuery||"";
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
     const unknown=data.filter(r=>!rowLocation(r)).length;
@@ -157,7 +158,7 @@
     state=stored[STATE_KEY]||initial();
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
-    settings={country:"auto",limit:0,searchQuery:"",...(stored[SETTINGS_KEY]||{})};
+    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",...(stored[SETTINGS_KEY]||{})};
     loading=false;
     render();
   }
@@ -210,6 +211,11 @@
   els.targetLocation.addEventListener("blur",saveFilters);
   els.country.addEventListener("change",async ()=>{
     settings.country=els.country.value;render();await saveSettings();
+  });
+  els.whatsappMessage.addEventListener("change",async ()=>{
+    settings.whatsappMessage=els.whatsappMessage.value.slice(0,1000);
+    await saveSettings();
+    render();
   });
   els.limit.addEventListener("change",async ()=>{
     let v=Number.parseInt(els.limit.value,10);
@@ -325,7 +331,7 @@
       if(filters.searchKey!==state.searchKey)filters=blankFilters(state.searchKey);
     }
     if(changes[FILTER_KEY])filters=changes[FILTER_KEY].newValue||blankFilters(state.searchKey);
-    if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,...(changes[SETTINGS_KEY].newValue||{})};
+    if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",...(changes[SETTINGS_KEY].newValue||{})};
     render();
   });
   Promise.all([currentTab(),readData()]).catch(err=>message("Error de Chrome: "+(err.message||String(err))));

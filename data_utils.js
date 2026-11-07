@@ -113,9 +113,11 @@
     if (/^\d{7,12}$/.test(n) && dial.length+n.length<=15) return dial+n;
     return "";
   }
-  function whatsapp(raw, country="auto", place="", searchUrl="") {
+  function whatsapp(raw, country="auto", place="", searchUrl="", message="") {
     const number=normalizePhone(raw,country,place,searchUrl);
-    return number ? `https://web.whatsapp.com/send?phone=${number}` : "";
+    if(!number)return "";
+    const text=String(message||"").trim();
+    return `https://web.whatsapp.com/send?phone=${number}${text?`&text=${encodeURIComponent(text)}`:""}`;
   }
   function suggestedTarget(rows,searchUrl) {
     const query=norm(fromSearch(searchUrl));
