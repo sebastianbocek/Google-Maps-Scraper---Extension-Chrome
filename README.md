@@ -25,6 +25,7 @@
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
+- Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas.
 - Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
 - Añade la columna `url_negocio` con el enlace a la ficha de cada negocio en Google Maps.
@@ -46,7 +47,7 @@
 9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades y elegir una ubicación objetivo.
 10. Haz clic en **Descargar CSV**.
 
-**Límite de fichas:** `0` deja que la extracción continúe hasta que Google Maps no cargue más resultados nuevos. No equivale a todos los negocios existentes en la zona.
+**Límite de fichas:** `0` no establece un máximo. La extensión sigue desplazándose mientras Maps cargue resultados; si no hay avance después de varios intentos, se pausa, guarda el progreso y permite continuar. No equivale a todos los negocios existentes en la zona.
 
 ## Cómo ayuda en la prospección freelance
 

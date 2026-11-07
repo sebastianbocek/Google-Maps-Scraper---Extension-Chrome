@@ -2,6 +2,15 @@
 'use strict';
 importScripts('data_utils.js');
 
+async function appendBackgroundLog(level,event,details={}) {
+  const {glcsv_state:state={}}=await chrome.storage.local.get('glcsv_state');
+  const logs=Array.isArray(state.logs)?state.logs:[];
+  logs.push({time:new Date().toISOString(),level,event,details});
+  state.logs=logs.slice(-200);
+  state.updatedAt=Date.now();
+  await chrome.storage.local.set({glcsv_state:state});
+}
+
 function searchSourceKey(url) {
   try {
     const parsed=new URL(url);
@@ -80,7 +89,10 @@ async function continueSavedSearch() {
   if(tab) {
     try {
       const ping=await chrome.tabs.sendMessage(tab.id,{type:'GLCSV_PING'});
-      if(ping?.running)return {ok:true,alreadyRunning:true,tabId:tab.id};
+      if(ping?.running) {
+        await appendBackgroundLog('info','Continuación solicitada; la extracción sigue activa',{tabId:tab.id,rows:state.rows?.length||0});
+        return {ok:true,alreadyRunning:true,tabId:tab.id};
+      }
     } catch {}
   } else {
     tab=await chrome.tabs.create({url:state.searchUrl,active:false});
@@ -110,21 +122,36 @@ async function stopSavedSearch() {
     } catch {}
   }
   const next={...state,status:stillRunning?'running':'paused',message:stillRunning?'Deteniendo extracción. El progreso quedó guardado.':'Extracción detenida. Puedes continuar desde el progreso guardado.',updatedAt:Date.now()};
+  const logs=Array.isArray(next.logs)?next.logs:[];
+  logs.push({time:new Date().toISOString(),level:'info',event:'Solicitud para detener la extracción',details:{tabId:state.tabId,stillRunning,rows:state.rows?.length||0}});
+  next.logs=logs.slice(-200);
   await chrome.storage.local.set({glcsv_state:next});
   return {ok:true};
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.type === 'GLCSV_SEARCH_AND_START') {
-    openMapsSearchAndStart(message).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    openMapsSearchAndStart(message).then(respond).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('error','No se pudo abrir Maps e iniciar la extracción',{query:String(message.query||''),error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
     return true;
   }
   if (message?.type === 'GLCSV_CONTINUE_SAVED') {
-    continueSavedSearch().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    continueSavedSearch().then(respond).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('error','No se pudo reanudar la extracción',{error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
     return true;
   }
   if (message?.type === 'GLCSV_STOP_SAVED') {
-    stopSavedSearch().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    stopSavedSearch().then(respond).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('error','No se pudo detener la extracción',{error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
     return true;
   }
   if (message?.type !== 'GLCSV_OPEN_WHATSAPP') return false;

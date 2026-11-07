@@ -20,6 +20,11 @@ header p.author a:hover { text-decoration: underline; }
 .stats b { color: #0e7453; font-size: 24px; }
 .stats span { font-size: 10px; color: #64746e; }
 .status { font-size: 12px; line-height: 1.5; border: 1px solid #e5e9e6; background: #fff; border-radius: 9px; padding: 10px; min-height: 44px; color: #425b51; overflow-wrap: anywhere; }
+.log-panel { margin: 10px 0; padding: 9px 10px; background: #fff; border: 1px solid #dee9e2; border-radius: 9px; }
+.log-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-size: 11px; font-weight: 700; }
+.log-panel summary span { color: #0e7453; background: #eaf7f0; border-radius: 10px; padding: 3px 7px; font-size: 10px; }
+.log-panel textarea { display: block; width: 100%; height: 150px; margin-top: 8px; resize: vertical; border: 1px solid #e1e9e4; border-radius: 6px; background: #f8faf9; padding: 7px; color: #425b51; font: 10px/1.4 ui-monospace, Consolas, monospace; white-space: pre; overflow: auto; }
+.log-panel button { width: 100%; margin-top: 7px; padding: 8px; font-size: 11px; }
 .options { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin: 14px 0 11px; gap: 4px; }
 .options label, .field-label { font-size: 12px; font-weight: 650; }
 .options input { width: 83px; text-align: center; }

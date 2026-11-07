@@ -30,10 +30,15 @@
       <div><b id="webCount">0</b><span>Sitios web</span></div>
     </div>
     <div class="status" id="status" role="status" aria-live="polite">Listo para comenzar.</div>
+    <details id="logPanel" class="log-panel" open>
+      <summary>Registro de actividad <span id="logCount">0 eventos</span></summary>
+      <textarea id="logOutput" rows="8" readonly aria-label="Registro de actividad"></textarea>
+      <button id="copyLog" type="button">Copiar log</button>
+    </details>
     <div class="options">
       <label for="limit">Máximo de fichas</label>
       <input id="limit" type="number" min="0" max="100000" step="1" value="0" />
-      <p><strong>0 = hasta que Google no muestre más.</strong> Recorre la lista y abre cada ficha para obtener los datos.</p>
+      <p><strong>0 = sin límite fijo.</strong> Si Maps deja de cargar resultados, la extracción se pausa y podés continuar desde el progreso guardado.</p>
     </div>
     <button id="start" class="primary">▶ Iniciar en esta pestaña</button>
     <div class="two">

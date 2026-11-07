@@ -373,36 +373,56 @@
     return merged;
   }
   function getScrollTarget(cards) {
+    const first=cards.find(card=>card.element?.isConnected)?.element||null;
+    const isScrollable=el=>{
+      if(!el||el===document.body||el===document.documentElement||el.clientHeight<150||el.scrollHeight<=el.clientHeight+80)return false;
+      const style=getComputedStyle(el);
+      const known=el.matches('div[role="feed"],.m6QErb,[data-results-container]');
+      return (/(auto|scroll|overlay|hidden)/.test(style.overflowY)||known)&&rect(el).width>170&&rect(el).width<innerWidth*.82;
+    };
     const feed=document.querySelector('div[role="feed"]');
-    if (feed && feed.scrollHeight > feed.clientHeight + 80) return feed;
-    let cur=cards[0]?.element || null;
-    while (cur && cur!==document.body) {
-      const st=getComputedStyle(cur);
-      if (cur.scrollHeight > cur.clientHeight+120 && /(auto|scroll)/.test(st.overflowY) && rect(cur).width < innerWidth*.85) return cur;
-      cur=cur.parentElement;
+    if(isScrollable(feed))return feed;
+    let current=first;
+    for(let depth=0;current&&current!==document.body&&depth<14;depth++,current=current.parentElement) {
+      if(isScrollable(current))return current;
     }
-    const possible=[...document.querySelectorAll("div,section,main")].filter(el=> {
-      const r=rect(el);
-      if (r.left > innerWidth*.58 || r.height < 160 || r.width < 190 || r.width > innerWidth*.65) return false;
-      return el.scrollHeight > el.clientHeight + 150 && /(auto|scroll)/.test(getComputedStyle(el).overflowY);
-    });
-    possible.sort((a,b)=>a.clientWidth-b.clientWidth);
-    return possible[0] || null;
+    const candidates=[...document.querySelectorAll('div[role="feed"],.m6QErb,[data-results-container],div,section,main')]
+      .filter(el=>isScrollable(el)&&(!first||el.contains(first)))
+      .sort((a,b)=>{
+        const score=el=>(el.matches('div[role="feed"]')?100:0)+(el.matches('.m6QErb,[data-results-container]')?50:0)+Math.min(rect(el).height,700)/100;
+        return score(b)-score(a);
+      });
+    return candidates[0]||null;
   }
   async function advanceResults(cards) {
     const scroller=getScrollTarget(cards);
     const beforeCount=selectCards().length;
     if (scroller) {
       const old=scroller.scrollTop;
-      scroller.scrollTop+=Math.max(420,Math.floor(scroller.clientHeight*.77));
+      const maxTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
+      const step=Math.max(520,Math.floor(scroller.clientHeight*.82));
+      scroller.scrollTop=Math.min(maxTop,old+step);
       scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
-      await wait(1150);
-      return scroller.scrollTop!==old || selectCards().length>beforeCount;
+      if(scroller.scrollTop===old) cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
+      await wait(1700);
+      const afterCount=selectCards().length;
+      const after=scroller.scrollTop;
+      return {moved:after!==old||afterCount>beforeCount,method:"container",target:`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`,topBefore:old,topAfter:after,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:beforeCount,cardsAfter:afterCount};
     }
     const old=window.scrollY;
-    window.scrollBy({top:Math.max(470,window.innerHeight*.7),behavior:"instant"});
-    await wait(1150);
-    return window.scrollY!==old || selectCards().length>beforeCount;
+    const step=Math.max(520,window.innerHeight*.78);
+    cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
+    window.scrollBy({top:step,behavior:"instant"});
+    await wait(1700);
+    const afterCount=selectCards().length;
+    return {moved:window.scrollY!==old||afterCount>beforeCount,method:"window-fallback",topBefore:old,topAfter:window.scrollY,cardsBefore:beforeCount,cardsAfter:afterCount};
+  }
+  const MAX_LOG_ENTRIES=200;
+  const MAX_NO_PROGRESS=8;
+  function logEvent(state,level,event,details={}) {
+    const logs=Array.isArray(state.logs)?state.logs:[];
+    logs.push({time:new Date().toISOString(),level,event,details});
+    state.logs=logs.slice(-MAX_LOG_ENTRIES);
   }
   async function scan({limit,searchUrl,tabId,country}) {
     let existing=(await chrome.storage.local.get(STATE_KEY))[STATE_KEY] || {};
@@ -413,13 +433,14 @@
     // Datos previos a 1.2 no guardaban ubicación: revisar una vez sus fichas.
     const inspected=new Set(canResume && existing.schemaVersion===2 ?
       (existing.inspectedIds || saved.map(row=>row.id)).filter(Boolean) : []);
-    const state={rows:[...rows.values()], inspectedIds:[...inspected], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:2, updatedAt:Date.now()};
+    const state={rows:[...rows.values()], inspectedIds:[...inspected], logs:canResume&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:2, updatedAt:Date.now()};
+    logEvent(state,"info",canResume?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
     let iterations=0;
     try {
-      while (!stopped && (limit===0 || rows.size < limit) && noProgress < 5 && iterations < 10000) {
+      while (!stopped && (limit===0 || rows.size < limit) && noProgress < MAX_NO_PROGRESS && iterations < 10000) {
         iterations++;
         const cards=selectCards();
         const pending=cards.filter(c=>!inspected.has(c.key));
@@ -451,6 +472,7 @@
           state.rows=[...rows.values()];
           state.inspectedIds=[...inspected];
           state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>r.website).length} webs`;
+          logEvent(state,"info","Ficha guardada",{name:card.name,total:rows.size,phone:Boolean(add.phone),website:Boolean(add.website),businessUrl:Boolean(add.businessUrl)});
           state.updatedAt=Date.now();
           await writeState(state);
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
@@ -461,17 +483,28 @@
         state.message=`Buscando más resultados... (${rows.size} guardados)`;
         await writeState(state);
         showOverlay(state.message);
-        const moved=await advanceResults(cards);
+        const beforeNoProgress=noProgress;
+        const scroll=await advanceResults(cards);
         const hasNew=selectCards().some(c=>!inspected.has(c.key));
-        noProgress = hasNew || count>0 || moved ? (count>0 || hasNew ? 0 : noProgress+1) : noProgress+1;
+        noProgress=hasNew||count>0||scroll.moved?0:noProgress+1;
+        state.message=`Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
+        logEvent(state,noProgress?"warn":"info","Desplazamiento para cargar más resultados",{iteration,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,...scroll});
+        state.updatedAt=Date.now();
+        await writeState(state);
+        showOverlay(state.message);
       }
-      state.status=stopped?"paused":"complete";
+      const limitReached=limit>0&&rows.size>=limit;
+      const needsContinue=!stopped&&!limitReached&&(noProgress>=MAX_NO_PROGRESS||iterations>=10000);
+      state.status=stopped||needsContinue?"paused":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
-        (limit>0 && rows.size>=limit)?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
+        limitReached?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
+        needsContinue?`Pausado: Maps no cargó nuevos resultados tras ${noProgress} intentos. ${rows.size} fichas guardadas; podés continuar.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
+      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,stopped,rows:rows.size});
     } catch(err) {
       state.status="error";
       state.message=`Interrumpido: ${err?.message || err}. Los ${rows.size} resultados guardados siguen disponibles.`;
+      logEvent(state,"error",state.message,{stack:String(err?.stack||"").slice(0,1800),iterations,rows:rows.size});
     } finally {
       state.rows=[...rows.values()];
       state.inspectedIds=[...inspected];

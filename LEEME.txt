@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.3.7
+GOOGLE LOCAL → CSV  |  v1.3.8
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -19,10 +19,12 @@ EXTRAER Y EXPORTAR
   extracción comenzará automáticamente.
 - Podés cambiar de pestaña mientras corre. El progreso se guarda; si se interrumpe,
   pulsá 'Continuar extracción guardada' para retomarlo, incluso en segundo plano.
+- El panel incluye un registro de actividad. Si algo falla, abrilo y pulsá 'Copiar log'
+  para compartir los detalles del desplazamiento y del error.
 - Abrí la sección Google 'Locales' (por ejemplo, 'joyeria posadas') o Google Maps.
 - Iniciá la extracción desde el icono de la extensión.
-- Máximo de fichas: 0 = sin límite predeterminado; termina cuando no encuentra
-  resultados nuevos después de varios intentos de desplazamiento.
+- Máximo de fichas: 0 = sin límite fijo. Si Maps no carga nuevos resultados tras
+  varios intentos de desplazamiento, la extracción se pausa y podés continuar.
 - La extracción guarda avances y se puede detener o continuar.
 - Antes de exportar, revisá las categorías y ubicaciones detectadas.
 - Papelera roja: excluir esa categoría o ciudad SOLO DE LA EXPORTACIÓN.

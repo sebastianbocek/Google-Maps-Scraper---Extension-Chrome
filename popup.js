@@ -3,11 +3,11 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
-  const initial=()=>({rows:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
+  const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:""};
@@ -74,6 +74,18 @@
       .replace(/[^a-z0-9_-]+/gi,"_").replace(/^_+|_+$/g,"").slice(0,62)||"negocios";
   }
   function message(str) {els.status.textContent=str;}
+  function formatLog(entry) {
+    const time=entry.time||new Date().toISOString();
+    const level=String(entry.level||"info").toUpperCase();
+    const details=entry.details&&Object.keys(entry.details).length?` ${JSON.stringify(entry.details)}`:"";
+    return `[${time}] [${level}] ${entry.event||"Evento"}${details}`;
+  }
+  function renderLog(entries) {
+    const logs=Array.isArray(entries)?entries:[];
+    els.logCount.textContent=`${logs.length} evento${logs.length===1?"":"s"}`;
+    els.logOutput.value=logs.slice(-40).map(formatLog).join("\n")||"Todavía no hay eventos registrados.";
+    els.logOutput.scrollTop=els.logOutput.scrollHeight;
+  }
   const trash='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 4v7m4-7v7"/></svg>';
   const undo='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2"/></svg>';
   function drawList(container,items,kind,exclusions) {
@@ -101,6 +113,7 @@
   function render() {
     if(loading) return;
     const data=rows(), kept=includedRows();
+    renderLog(state.logs);
     els.total.textContent=String(data.length);
     els.phoneCount.textContent=String(data.filter(r=>r.phone).length);
     els.webCount.textContent=String(data.filter(r=>r.website).length);
@@ -134,7 +147,7 @@
     els.country.disabled=state.status==="running";
     els.searchQuery.disabled=state.status==="running";
     els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
-    els.resume.hidden=!state.searchUrl || state.status==="complete";
+    els.resume.hidden=!state.searchUrl;
     els.resume.textContent=state.status==="running"?"● Comprobar extracción en segundo plano":"↻ Continuar extracción guardada";
     els.start.textContent=state.status==="running"?"● Extracción en curso":
       data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
@@ -147,6 +160,14 @@
     settings={country:"auto",limit:0,searchQuery:"",...(stored[SETTINGS_KEY]||{})};
     loading=false;
     render();
+  }
+  async function appendUiLog(level,event,details={}) {
+    const stored=await chrome.storage.local.get(STATE_KEY);
+    const latest=stored[STATE_KEY]||state;
+    const logs=Array.isArray(latest.logs)?latest.logs:[];
+    logs.push({time:new Date().toISOString(),level,event,details});
+    latest.logs=logs.slice(-200);
+    await chrome.storage.local.set({[STATE_KEY]:latest});
   }
   async function currentTab() {
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
@@ -218,6 +239,7 @@
       message("Búsqueda abierta. La extracción ya está en marcha en la nueva pestaña.");
       await readData();
     } catch(err) {
+      await appendUiLog("error","No se pudo iniciar la búsqueda",{query,error:err.message||String(err)});
       render();message("Error al iniciar la búsqueda: "+(err.message||String(err)));
     }
   }
@@ -238,8 +260,21 @@
       if(result.alreadyRunning)message("La extracción sigue activa en la pestaña de Maps.");
       else message("Extracción reanudada desde el último progreso guardado en Maps.");
       await readData();
-    } catch(err) {render();message("Error al continuar: "+(err.message||String(err)));}
+    } catch(err) {await appendUiLog("error","No se pudo continuar la extracción",{error:err.message||String(err)});render();message("Error al continuar: "+(err.message||String(err)));}
     finally {els.resume.disabled=false;}
+  });
+  els.copyLog.addEventListener("click",async ()=>{
+    const text=(Array.isArray(state.logs)?state.logs:[]).map(formatLog).join("\n")||"Sin eventos registrados.";
+    els.logPanel.open=true;
+    try {
+      await navigator.clipboard.writeText(text);
+      message("Log copiado al portapapeles.");
+    } catch {
+      els.logOutput.value=text;els.logOutput.focus();els.logOutput.select();
+      const copied=document.execCommand("copy");
+      els.logOutput.setSelectionRange(0,0);
+      message(copied?"Log copiado al portapapeles.":"No se pudo copiar automáticamente; seleccioná el texto del log.");
+    }
   });
   els.start.addEventListener("click",async ()=>{
     if(!pageSupported)return;
@@ -256,11 +291,11 @@
       const result=await send("GLCSV_START",{limit:settings.limit,country:settings.country,searchUrl:activeTab.url,tabId:activeTab.id});
       if(!result?.ok)throw new Error(result?.error||"Google no aceptó el inicio.");
       await readData();
-    } catch(err){render();message("Error: "+(err.message||String(err)));}
+    } catch(err){await appendUiLog("error","Error al iniciar en esta pestaña",{error:err.message||String(err)});render();message("Error: "+(err.message||String(err)));}
   });
   els.stop.addEventListener("click",async ()=>{
     try { const result=await chrome.runtime.sendMessage({type:"GLCSV_STOP_SAVED"});if(!result?.ok)throw new Error(result?.error||"No había extracción activa.");await readData(); }
-    catch(err) {message("Error al detener: "+(err.message||String(err)));}
+    catch(err) {await appendUiLog("error","Error al detener extracción",{error:err.message||String(err)});message("Error al detener: "+(err.message||String(err)));}
   });
   els.download.addEventListener("click",async ()=>{
     try {
