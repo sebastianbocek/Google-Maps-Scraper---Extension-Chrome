@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.3.8
+GOOGLE LOCAL → CSV  |  v1.3.9
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME

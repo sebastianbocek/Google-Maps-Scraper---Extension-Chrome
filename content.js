@@ -488,7 +488,7 @@
         const hasNew=selectCards().some(c=>!inspected.has(c.key));
         noProgress=hasNew||count>0||scroll.moved?0:noProgress+1;
         state.message=`Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
-        logEvent(state,noProgress?"warn":"info","Desplazamiento para cargar más resultados",{iteration,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,...scroll});
+        logEvent(state,noProgress?"warn":"info","Desplazamiento para cargar más resultados",{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,...scroll});
         state.updatedAt=Date.now();
         await writeState(state);
         showOverlay(state.message);
