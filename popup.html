@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Google Local → CSV</title>
+  <link rel="stylesheet" href="popup.css"/>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="logo">G<span>→</span>C</div>
+      <div><h1>Google Local → CSV</h1><p>Extractor y limpieza de negocios</p></div>
+    </header>
+    <div id="page" class="page">Detectando pestaña...</div>
+    <div class="stats">
+      <div><b id="total">0</b><span>Detectados</span></div>
+      <div><b id="phoneCount">0</b><span>Teléfonos</span></div>
+      <div><b id="webCount">0</b><span>Sitios web</span></div>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite">Listo para comenzar.</div>
+    <div class="options">
+      <label for="limit">Máximo de fichas</label>
+      <input id="limit" type="number" min="0" max="100000" step="1" value="0" />
+      <p><strong>0 = hasta que Google no muestre más.</strong> Recorre la lista y abre cada ficha para obtener los datos.</p>
+    </div>
+    <button id="start" class="primary">▶ Iniciar extracción</button>
+    <div class="two">
+      <button id="stop" disabled>■ Detener</button>
+      <button id="download" disabled>↓ Descargar CSV</button>
+    </div>
+
+    <section class="filter-panel" aria-labelledby="filterTitle">
+      <div class="filter-head">
+        <div><h2 id="filterTitle">Limpiar CSV</h2><p>Excluí lo que no querés exportar. Podés deshacerlo.</p></div>
+        <span id="exportCount" class="export-count">0 / 0</span>
+      </div>
+      <label class="field-label" for="country">País para teléfonos sin prefijo internacional</label>
+      <select id="country">
+        <option value="auto">Automático según dirección</option>
+        <option value="54">Argentina (+54)</option>
+        <option value="595">Paraguay (+595)</option>
+        <option value="55">Brasil (+55)</option>
+        <option value="598">Uruguay (+598)</option>
+        <option value="1">EE. UU./Canadá (+1)</option>
+        <option value="56">Chile (+56)</option>
+        <option value="591">Bolivia (+591)</option>
+        <option value="51">Perú (+51)</option>
+        <option value="34">España (+34)</option>
+      </select>
+      <div class="filter-title-row"><h3>Categorías detectadas</h3><span id="categoryCount">0</span></div>
+      <div id="categories" class="filter-list" aria-label="Filtros por categoría"><p class="empty">Todavía no hay categorías.</p></div>
+      <div class="filter-title-row"><h3>Ubicaciones detectadas</h3><span id="locationCount">0</span></div>
+      <div id="locations" class="filter-list" aria-label="Filtros por ubicación"><p class="empty">Todavía no hay ubicaciones.</p></div>
+      <label class="field-label target-label" for="targetLocation">Ubicación objetivo (ciudad)</label>
+      <input id="targetLocation" type="text" placeholder="Ej.: Posadas" maxlength="80" autocomplete="off" />
+      <label class="checkline"><input id="strictLocation" type="checkbox" checked/> Exportar solo la ubicación objetivo</label>
+      <p id="locationHint" class="hint">Si una ficha no indica ciudad, se excluirá cuando actives un filtro de ciudad.</p>
+    </section>
+    <div class="quick-wa">
+      <strong>WhatsApp directo</strong>
+      <p><kbd>Alt</kbd> + clic en el teléfono → abre WhatsApp Web en otra pestaña.<br/>Para probar el otro formato argentino: <kbd>Alt</kbd> + <kbd>Shift</kbd> + clic.</p>
+    </div>
+    <button id="clear" class="text-btn">Limpiar todos los resultados guardados</button>
+    <p class="foot">CSV: Nombre · Teléfono · Rating · Categoría · Website · WhatsApp Link. Sin servidores externos.</p>
+  </main>
+  <script src="data_utils.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
