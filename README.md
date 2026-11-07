@@ -14,7 +14,7 @@
 
 [Ver o descargar el video MP4](assets/demo.mp4)
 
-## Vista de la extracción
+## Vista de la extensión
 
 ![Panel de Google Local a CSV](assets/extension-panel.png)
 
