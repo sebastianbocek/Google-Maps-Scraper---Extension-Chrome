@@ -16,7 +16,7 @@
 
 ## Vista de la extensión
 
-![Panel de Google Local a CSV](assets/extension-panel.png)
+![Panel de Google Local a CSV](assets/extension-panel-1.3.5.png)
 
 ## Qué hace
 
@@ -71,6 +71,7 @@ La extensión no usa un backend y guarda los resultados en el almacenamiento loc
 ## Instalación manual desde el código
 
 Clona este repositorio, abre `chrome://extensions/`, activa **Modo desarrollador** y selecciona **Cargar descomprimida** para la carpeta del proyecto que contiene `manifest.json`.
+
 
 
 
