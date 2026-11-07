@@ -45,7 +45,6 @@
       <button id="stop" disabled>■ Detener extracción</button>
       <button id="download" disabled>↓ Descargar CSV</button>
     </div>
-    <button id="downloadAll" class="download-all" hidden>Descargar todos los resultados sin filtros</button>
 
     <section class="filter-panel" aria-labelledby="filterTitle">
       <div class="filter-head">
@@ -86,7 +85,7 @@
       <div id="locations" class="filter-list" aria-label="Filtros por ubicación"><p class="empty">Todavía no hay ubicaciones.</p></div>
       <label class="field-label target-label" for="targetLocation">Ubicación objetivo (ciudad)</label>
       <input id="targetLocation" type="text" placeholder="Ej.: Posadas" maxlength="80" autocomplete="off" />
-      <label class="checkline"><input id="strictLocation" type="checkbox" checked/> Exportar solo la ubicación objetivo</label>
+      <label class="checkline"><input id="strictLocation" type="checkbox"/> Exportar solo la ubicación objetivo</label>
       <p id="locationHint" class="hint">Si una ficha no indica ciudad, se excluirá cuando actives un filtro de ciudad.</p>
     </section>
     <div class="quick-wa">

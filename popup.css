@@ -39,7 +39,6 @@ button.primary { width: 100%; background: #11694e; border-color: #11694e; color:
 .two { display: flex; gap: 8px; margin-top: 8px; }
 .two button { flex: 1; }
 .two button:last-child:not(:disabled) { border-color: #a9c4b7; background: #ecf6f1; }
-.download-all { width: 100%; margin-top: 8px; border-color: #d8ba82; background: #fff8e9; color: #6c4b12; }
 .filter-panel { background: #fff; border: 1px solid #dee9e2; border-radius: 11px; margin-top: 15px; padding: 12px; }
 .filter-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .filter-head h2 { font-size: 14px; margin: 0 0 4px; }

@@ -3,12 +3,12 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","downloadAll","clear",
+  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
-  const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true,websiteMode:"all",phoneMode:"all"});
+  const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:""};
   let loading=true;
@@ -69,16 +69,14 @@
     const header=["nombre","telefono","rating","categoria","website","whatsapp_link","url_negocio"];
     return "\uFEFF"+[header,...items.map(rowCsv)].map(r=>r.map(csvCell).join(",")).join("\r\n")+"\r\n";
   }
-  async function downloadCsv(items,ignoreFilters) {
+  async function downloadCsv(items) {
     const q=util.fromSearch(state.searchUrl)||"google_maps";
     const suffix=new Date().toISOString().slice(0,10);
     const blob=new Blob([buildCsv(items)],{type:"text/csv;charset=utf-8"});
     const url=URL.createObjectURL(blob);
     try {
       await chrome.downloads.download({url,filename:`negocios_${fileSlug(q)}_${suffix}.csv`,saveAs:true,conflictAction:"uniquify"});
-      message(ignoreFilters
-        ? `CSV preparado: ${items.length} fichas. Se ignoraron los filtros actuales.`
-        : `CSV preparado: ${items.length} de ${rows().length} fichas. Excluidas: ${rows().length-items.length}.`);
+      message(`CSV preparado: ${items.length} de ${rows().length} fichas. Excluidas: ${rows().length-items.length}.`);
     } finally {setTimeout(()=>URL.revokeObjectURL(url),60000);}
   }
   function fileSlug(input) {
@@ -156,8 +154,6 @@
     els.start.disabled=!pageSupported || state.status==="running";
     els.stop.disabled=state.status!=="running";
     els.download.disabled=kept.length===0;
-    els.downloadAll.hidden=data.length===0 || kept.length>0;
-    els.downloadAll.textContent=`↓ Descargar los ${data.length} resultados sin filtros`;
     els.limit.disabled=state.status==="running";
     els.country.disabled=state.status==="running";
     els.searchQuery.disabled=state.status==="running";
@@ -172,6 +168,12 @@
     state=stored[STATE_KEY]||initial();
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
+    if(typeof filters.locationFilterTouched!=="boolean") {
+      // Las versiones anteriores filtraban automáticamente por la ciudad sugerida.
+      // Convertir ese valor predeterminado en opcional evita excluir resultados sin aviso.
+      filters={...filters,strictLocation:false,locationFilterTouched:false};
+      await chrome.storage.local.set({[FILTER_KEY]:filters});
+    }
     settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",...(stored[SETTINGS_KEY]||{})};
     loading=false;
     render();
@@ -209,7 +211,7 @@
     });
   }
   els.strictLocation.addEventListener("change",async ()=>{
-    filters.strictLocation=els.strictLocation.checked;render();await saveFilters();
+    filters.strictLocation=els.strictLocation.checked;filters.locationFilterTouched=true;render();await saveFilters();
   });
   for(const field of ["websiteMode","phoneMode"]) {
     els[field].addEventListener("change",async ()=>{
@@ -321,14 +323,7 @@
     try {
       const selected=includedRows();
       if(!selected.length) {message("No hay fichas que cumplan los filtros.");return;}
-      await downloadCsv(selected,false);
-    } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
-  });
-  els.downloadAll.addEventListener("click",async ()=>{
-    try {
-      const all=rows();
-      if(!all.length)return;
-      await downloadCsv(all,true);
+      await downloadCsv(selected);
     } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
   });
   els.clear.addEventListener("click",async ()=>{
