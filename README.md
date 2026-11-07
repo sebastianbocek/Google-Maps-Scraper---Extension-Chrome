@@ -4,7 +4,7 @@
 
 **Prospección local más simple para freelancers.** Encuentra negocios en Google Maps, revisa y limpia los datos, y expórtalos a CSV desde Chrome.
 
-[Descargar extensión](https://github.com/sebastianbocek/Google-Maps-Scraper-Extension/releases/latest/download/google-maps-scraper-extension.zip) · [Ver video de muestra](https://github.com/sebastianbocek/Google-Maps-Scraper-Extension/releases/latest/download/demo.mp4)
+[Descargar extensión](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) · [Ver video de muestra](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/demo.mp4)
 
 </div>
 
@@ -28,7 +28,7 @@
 
 ## Instalación en Chrome
 
-1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper-Extension/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela en una carpeta.
+1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela en una carpeta.
 2. Abre `chrome://extensions/` en Chrome.
 3. Activa **Modo desarrollador** en la parte superior derecha.
 4. Haz clic en **Cargar descomprimida**.
@@ -66,3 +66,4 @@ La extensión no usa un backend y guarda los resultados en el almacenamiento loc
 ## Instalación manual desde el código
 
 Clona este repositorio, abre `chrome://extensions/`, activa **Modo desarrollador** y selecciona **Cargar descomprimida** para la carpeta del proyecto que contiene `manifest.json`.
+
