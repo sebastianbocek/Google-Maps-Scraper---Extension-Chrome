@@ -8,15 +8,15 @@
 
 </div>
 
-## Vista de la extensión
-
-![Panel de Google Local a CSV](assets/extension-panel.png)
-
 ## Demo
 
 ![Demostración de Google Maps Scraper](assets/demo.gif)
 
 [Ver o descargar el video MP4](assets/demo.mp4)
+
+## Vista de la extracción
+
+![Panel de Google Local a CSV](assets/extension-panel.png)
 
 ## Qué hace
 
@@ -70,6 +70,7 @@ La extensión no usa un backend y guarda los resultados en el almacenamiento loc
 ## Instalación manual desde el código
 
 Clona este repositorio, abre `chrome://extensions/`, activa **Modo desarrollador** y selecciona **Cargar descomprimida** para la carpeta del proyecto que contiene `manifest.json`.
+
 
 
 
