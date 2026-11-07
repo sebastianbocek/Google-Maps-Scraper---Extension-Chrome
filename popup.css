@@ -14,6 +14,7 @@ header p.author a:hover { text-decoration: underline; }
 .search-box .field-label { display: block; margin: 0 0 6px; }
 .search-box input { width: 100%; margin-bottom: 8px; }
 .search-box p { margin: 7px 0 0; color: #687971; font-size: 10.5px; line-height: 1.45; }
+.resume-btn { width: 100%; margin-top: 8px; border-color: #a9c4b7; background: #ecf6f1; color: #14513c; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
 .stats > div { border-radius: 10px; background: white; box-shadow: 0 1px 4px #16322910; text-align: center; padding: 12px 6px; display: flex; flex-direction: column; gap: 3px; }
 .stats b { color: #0e7453; font-size: 24px; }

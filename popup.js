@@ -3,7 +3,7 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","resume","total","phoneCount","webCount","status","limit","start","stop","download","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
@@ -134,6 +134,8 @@
     els.country.disabled=state.status==="running";
     els.searchQuery.disabled=state.status==="running";
     els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
+    els.resume.hidden=!state.searchUrl || state.status==="complete";
+    els.resume.textContent=state.status==="running"?"● Comprobar extracción en segundo plano":"↻ Continuar extracción guardada";
     els.start.textContent=state.status==="running"?"● Extracción en curso":
       data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
   }
@@ -227,6 +229,18 @@
   els.searchQuery.addEventListener("keydown",event=>{
     if(event.key==="Enter") {event.preventDefault();startSearchFromPopup();}
   });
+  els.resume.addEventListener("click",async ()=>{
+    els.resume.disabled=true;
+    message("Comprobando la pestaña de Maps y el progreso guardado…");
+    try {
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_CONTINUE_SAVED"});
+      if(!result?.ok)throw new Error(result?.error||"No se pudo continuar la extracción.");
+      if(result.alreadyRunning)message("La extracción sigue activa en la pestaña de Maps.");
+      else message("Extracción reanudada desde el último progreso guardado en Maps.");
+      await readData();
+    } catch(err) {render();message("Error al continuar: "+(err.message||String(err)));}
+    finally {els.resume.disabled=false;}
+  });
   els.start.addEventListener("click",async ()=>{
     if(!pageSupported)return;
     try {
@@ -245,7 +259,7 @@
     } catch(err){render();message("Error: "+(err.message||String(err)));}
   });
   els.stop.addEventListener("click",async ()=>{
-    try { const result=await send("GLCSV_STOP");if(!result?.ok)throw new Error(result?.error||"No había extracción activa.");await readData(); }
+    try { const result=await chrome.runtime.sendMessage({type:"GLCSV_STOP_SAVED"});if(!result?.ok)throw new Error(result?.error||"No había extracción activa.");await readData(); }
     catch(err) {message("Error al detener: "+(err.message||String(err)));}
   });
   els.download.addEventListener("click",async ()=>{

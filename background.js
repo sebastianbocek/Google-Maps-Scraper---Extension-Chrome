@@ -9,6 +9,14 @@ function searchSourceKey(url) {
   } catch { return String(url||'').split('#')[0]; }
 }
 
+function supportedSearchUrl(url) {
+  try {
+    const parsed=new URL(url);
+    const googleHost=/(^|\.)google\.[a-z.]+$/i.test(parsed.hostname);
+    return googleHost&&(parsed.pathname.startsWith('/maps')||(parsed.pathname==='/search'&&(parsed.searchParams.get('udm')==='local'||parsed.searchParams.get('tbm')==='lcl')));
+  } catch { return false; }
+}
+
 function waitForTabComplete(tabId,timeoutMs=60000) {
   return new Promise((resolve,reject)=>{
     let settled=false;
@@ -57,9 +65,66 @@ async function openMapsSearchAndStart(message) {
   return {ok:true,tabId:tab.id};
 }
 
+async function continueSavedSearch() {
+  const stored=await chrome.storage.local.get(['glcsv_state','glcsv_settings']);
+  const state=stored.glcsv_state||{};
+  const settings=stored.glcsv_settings||{};
+  if(!state.searchUrl)throw new Error('Todavía no hay una búsqueda guardada para continuar.');
+  let tab=null;
+  if(Number.isInteger(state.tabId)) {
+    try {
+      const candidate=await chrome.tabs.get(state.tabId);
+      if(supportedSearchUrl(candidate.url)&&searchSourceKey(candidate.url)===state.searchKey)tab=candidate;
+    } catch {}
+  }
+  if(tab) {
+    try {
+      const ping=await chrome.tabs.sendMessage(tab.id,{type:'GLCSV_PING'});
+      if(ping?.running)return {ok:true,alreadyRunning:true,tabId:tab.id};
+    } catch {}
+  } else {
+    tab=await chrome.tabs.create({url:state.searchUrl,active:false});
+    if(tab.id==null)throw new Error('Chrome no pudo recuperar la pestaña de Maps.');
+  }
+  if(tab.status!=='complete')await waitForTabComplete(tab.id);
+  await chrome.scripting.executeScript({target:{tabId:tab.id},files:['data_utils.js','content.js']});
+  const result=await chrome.tabs.sendMessage(tab.id,{
+    type:'GLCSV_START',
+    limit:settings.limit??0,
+    country:settings.country||'auto',
+    searchUrl:state.searchUrl,
+    tabId:tab.id
+  });
+  if(!result?.ok)throw new Error(result?.error||'No se pudo reanudar la extracción.');
+  return {ok:true,tabId:tab.id};
+}
+
+async function stopSavedSearch() {
+  const {glcsv_state:state={}}=await chrome.storage.local.get('glcsv_state');
+  if(!state.searchUrl)throw new Error('No hay una extracción para detener.');
+  let stillRunning=false;
+  if(Number.isInteger(state.tabId)) {
+    try {
+      const result=await chrome.tabs.sendMessage(state.tabId,{type:'GLCSV_STOP'});
+      stillRunning=Boolean(result?.ok&&result.running);
+    } catch {}
+  }
+  const next={...state,status:stillRunning?'running':'paused',message:stillRunning?'Deteniendo extracción. El progreso quedó guardado.':'Extracción detenida. Puedes continuar desde el progreso guardado.',updatedAt:Date.now()};
+  await chrome.storage.local.set({glcsv_state:next});
+  return {ok:true};
+}
+
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (message?.type === 'GLCSV_SEARCH_AND_START') {
     openMapsSearchAndStart(message).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if (message?.type === 'GLCSV_CONTINUE_SAVED') {
+    continueSavedSearch().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if (message?.type === 'GLCSV_STOP_SAVED') {
+    stopSavedSearch().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
     return true;
   }
   if (message?.type !== 'GLCSV_OPEN_WHATSAPP') return false;

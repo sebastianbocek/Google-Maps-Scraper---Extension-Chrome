@@ -497,7 +497,7 @@
       sendResponse({ok:true});
     } else if (message?.type==="GLCSV_STOP") {
       stopped=true;
-      sendResponse({ok:true});
+      sendResponse({ok:true,running});
     } else if (message?.type==="GLCSV_PING") sendResponse({ok:true,running});
   });
 })();

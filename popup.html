@@ -21,7 +21,8 @@
       <label class="field-label" for="searchQuery">¿Qué negocios buscás?</label>
       <input id="searchQuery" type="search" maxlength="180" placeholder="Ej.: cafeterías en Palermo" autocomplete="off" />
       <button id="searchStart" class="primary">▶ Buscar y comenzar extracción</button>
-      <p>Google Maps se abrirá en una pestaña nueva.</p>
+      <p>Google Maps se abrirá en una pestaña nueva. El progreso se guarda para poder continuar después.</p>
+      <button id="resume" class="resume-btn" hidden>↻ Continuar extracción guardada</button>
     </section>
     <div class="stats">
       <div><b id="total">0</b><span>Detectados</span></div>
@@ -36,7 +37,7 @@
     </div>
     <button id="start" class="primary">▶ Iniciar en esta pestaña</button>
     <div class="two">
-      <button id="stop" disabled>■ Detener</button>
+      <button id="stop" disabled>■ Detener extracción</button>
       <button id="download" disabled>↓ Descargar CSV</button>
     </div>
 
