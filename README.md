@@ -23,7 +23,7 @@
 - Extrae fichas de negocios visibles en Google Maps y Google Local.
 - Guarda nombre, teléfono, valoración, categoría, sitio web y enlace de WhatsApp cuando están disponibles.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
-- Limpia la exportación antes de descargar: excluye categorías o ciudades y permite elegir una ubicación objetivo.
+- Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
 - Abre WhatsApp Web para un teléfono con `Alt` + clic sobre el número en Google Maps.
 - Procesa y guarda los datos localmente en Chrome; no los envía a un servidor externo.
@@ -39,7 +39,7 @@
 5. Selecciona la carpeta descomprimida que contiene `manifest.json`.
 6. Abre [Google Maps](https://www.google.com/maps) y realiza una búsqueda, por ejemplo: “cafeterías en Palermo”.
 7. Haz clic en el icono de la extensión y luego en **Iniciar extracción**. Deja que Google Maps cargue los resultados mientras la extensión recorre las fichas.
-8. Revisa las categorías y ubicaciones en **Limpiar CSV**. Excluye lo que no quieras exportar o elige una ubicación objetivo.
+8. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades y elegir una ubicación objetivo.
 9. Haz clic en **Descargar CSV**.
 
 **Límite de fichas:** `0` deja que la extracción continúe hasta que Google Maps no cargue más resultados nuevos. No equivale a todos los negocios existentes en la zona.

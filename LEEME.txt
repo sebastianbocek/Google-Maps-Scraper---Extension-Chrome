@@ -1,0 +1,55 @@
+GOOGLE LOCAL → CSV  |  v1.3
+=================================
+
+EXTENSIÓN PARA GOOGLE CHROME
+
+INSTALAR O ACTUALIZAR
+1. Si ya usabas v1.1, descargá antes el CSV de los resultados guardados por seguridad.
+2. Descomprimí el ZIP en una carpeta normal de tu equipo.
+3. Abrí chrome://extensions.
+4. Activá 'Modo desarrollador' y elegí 'Cargar descomprimida'.
+5. Seleccioná la carpeta que contiene el archivo manifest.json.
+6. Si conservás una instalación anterior de esta extensión, reemplazá los archivos
+   en la misma carpeta original y pulsá 'Recargar' para conservar su instalación.
+7. Recargá la pestaña abierta de Google Maps/Locales.
+
+EXTRAER Y EXPORTAR
+- Abrí la sección Google 'Locales' (por ejemplo, 'joyeria posadas') o Google Maps.
+- Iniciá la extracción desde el icono de la extensión.
+- Máximo de fichas: 0 = sin límite predeterminado; termina cuando no encuentra
+  resultados nuevos después de varios intentos de desplazamiento.
+- La extracción guarda avances y se puede detener o continuar.
+- Antes de exportar, revisá las categorías y ubicaciones detectadas.
+- Papelera roja: excluir esa categoría o ciudad SOLO DE LA EXPORTACIÓN.
+- Flecha de restauración: volver a incluirla.
+- 'Ubicación objetivo': elegí la ciudad exacta; 'Exportar solo la ubicación objetivo'
+  elimina del CSV las fichas de otras ciudades o sin ciudad verificable.
+- 'Sitio web' y 'Teléfono': elegí todos los negocios, solo los que tienen el dato,
+  o solo los que no lo tienen. Los filtros se aplican únicamente al CSV exportado.
+- Descargá el CSV con: nombre, telefono, rating, categoria, website, whatsapp_link.
+- Cuando una ficha no proporciona un dato, ese campo queda vacío.
+
+TELÉFONO → WHATSAPP EN UN CLIC
+- En Google Maps/Locales, mantén ALT y hacé CLIC sobre el teléfono del negocio:
+  se abrirá una pestaña nueva de WhatsApp Web sin reemplazar Google Maps.
+- ALT + SHIFT + clic: prueba el otro formato argentino (+54 9 / +54).
+- El clic normal no se modifica, para evitar interferencias con Google.
+- En el panel, seleccioná país si el número no incluye código internacional.
+- Si incluye +595, +55, +598, etc., el prefijo se respeta automáticamente.
+- Un enlace válido no garantiza que el teléfono tenga una cuenta de WhatsApp.
+- Si todavía tenés habilitada la PRIMERA extensión 'Google Teléfono → WhatsApp',
+  desactivala para evitar que ambas intenten gestionar el mismo clic.
+
+LIMITACIONES
+- Google modifica frecuentemente su interfaz. Si cambia la estructura de las
+  fichas, puede ser necesario actualizar los selectores.
+- Google puede mostrar resultados de localidades vecinas o datos incompletos.
+  La limpieza por ubicación actúa sobre la exportación, no modifica Google.
+- '0' no significa todos los negocios existentes, solo hasta que Google deje
+  de cargar resultados nuevos en esa sesión.
+- Los datos se procesan y guardan en Chrome localmente. No hay servidor externo.
+- No se envían mensajes automáticamente.
+
+Si actualizás reemplazando los archivos de la misma carpeta original, mantenés
+la identidad de la extensión y las filas previamente guardadas. Si la cargás
+como otra carpeta, Chrome puede asignarle otra identidad y almacenamiento.

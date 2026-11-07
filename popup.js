@@ -4,11 +4,11 @@
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
   const names=["page","total","phoneCount","webCount","status","limit","start","stop","download","clear",
-    "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount"];
+    "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
   const initial=()=>({rows:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
-  const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true});
+  const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0};
   let loading=true;
@@ -50,8 +50,11 @@
   function includedRows() {
     const badCats=new Set(filters.excludedCategories||[]),badCities=new Set(filters.excludedLocations||[]);
     const targetCity=filters.strictLocation?target():"";
+    const websiteMode=filters.websiteMode||"all",phoneMode=filters.phoneMode||"all";
     return rows().filter(row=>!badCats.has(groupKey(rowCategory(row))) &&
-      !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity));
+      !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity) &&
+      (websiteMode==="all" || (websiteMode==="with" ? Boolean(String(row.website||"").trim()) : !String(row.website||"").trim())) &&
+      (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
   }
   function rowCsv(row) {
     const link=util.whatsapp(row.phone||"",settings.country||"auto",row.address || rowLocation(row),state.searchUrl) || row.whatsappLink || "";
@@ -112,6 +115,8 @@
     if(document.activeElement!==els.targetLocation) els.targetLocation.value=target();
     els.targetLocation.placeholder=suggest?`Ej.: ${suggest}`:"Ej.: Posadas";
     els.strictLocation.checked=filters.strictLocation!==false;
+    els.websiteMode.value=filters.websiteMode||"all";
+    els.phoneMode.value=filters.phoneMode||"all";
     els.country.value=settings.country||"auto";
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
     const unknown=data.filter(r=>!rowLocation(r)).length;
@@ -165,6 +170,11 @@
   els.strictLocation.addEventListener("change",async ()=>{
     filters.strictLocation=els.strictLocation.checked;render();await saveFilters();
   });
+  for(const field of ["websiteMode","phoneMode"]) {
+    els[field].addEventListener("change",async ()=>{
+      filters[field]=els[field].value;render();await saveFilters();
+    });
+  }
   els.targetLocation.addEventListener("input",()=>{
     filters.targetTouched=true;filters.targetLocation=els.targetLocation.value.trim();
     // Renderiza conteos y filas, sin reemplazar el texto bajo edición.
