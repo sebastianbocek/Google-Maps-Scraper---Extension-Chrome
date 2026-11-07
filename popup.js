@@ -3,18 +3,18 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","total","phoneCount","webCount","status","limit","start","stop","download","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
   const initial=()=>({rows:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:true,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
-  let filters=blankFilters(""), settings={country:"auto",limit:0};
+  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:""};
   let loading=true;
   const UNKNOWN="__unknown__";
   function sourceKey(url) {
-    try { const u=new URL(url); return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q")||""}&udm=${u.searchParams.get("udm")||""}`; }
+    try { const u=new URL(url); return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q")||u.searchParams.get("query")||""}&udm=${u.searchParams.get("udm")||""}`; }
     catch { return (url||"").split("#")[0]; }
   }
   function supported(url) {
@@ -118,6 +118,7 @@
     els.websiteMode.value=filters.websiteMode||"all";
     els.phoneMode.value=filters.phoneMode||"all";
     els.country.value=settings.country||"auto";
+    if(document.activeElement!==els.searchQuery) els.searchQuery.value=settings.searchQuery||"";
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
     const unknown=data.filter(r=>!rowLocation(r)).length;
     els.locationHint.textContent=!data.length?"Para filtrar por ciudad se utiliza la dirección pública de cada ficha.":
@@ -131,15 +132,17 @@
     els.download.disabled=kept.length===0;
     els.limit.disabled=state.status==="running";
     els.country.disabled=state.status==="running";
+    els.searchQuery.disabled=state.status==="running";
+    els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
     els.start.textContent=state.status==="running"?"● Extracción en curso":
-      data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar extracción":"▶ Iniciar extracción";
+      data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
   }
   async function readData() {
     const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY]);
     state=stored[STATE_KEY]||initial();
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
-    settings={country:"auto",limit:0,...(stored[SETTINGS_KEY]||{})};
+    settings={country:"auto",limit:0,searchQuery:"",...(stored[SETTINGS_KEY]||{})};
     loading=false;
     render();
   }
@@ -147,7 +150,7 @@
     const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
     activeTab=tab||null;pageSupported=Boolean(activeTab&&supported(activeTab.url));
     els.page.textContent=pageSupported ?
-      (util.fromSearch(activeTab.url) || "Google Maps") : "Abrí una búsqueda de Google Locales o Maps";
+      (util.fromSearch(activeTab.url) || "Google Maps") : "Escribí una búsqueda o abrí Google Maps";
     els.page.title=activeTab?.url||"";
     render();
   }
@@ -189,6 +192,40 @@
     let v=Number.parseInt(els.limit.value,10);
     if(!Number.isFinite(v)||v<0)v=0;
     settings.limit=Math.min(100000,v);render();await saveSettings();
+  });
+  async function startSearchFromPopup() {
+    const query=els.searchQuery.value.trim();
+    if(!query) {message("Escribí qué negocio o categoría querés buscar.");return;}
+    if(state.status==="running") {message("Esperá a que termine o detené la extracción actual.");return;}
+    const mapsUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    const sameSearch=rows().length>0 && util.norm(util.fromSearch(state.searchUrl))===util.norm(query);
+    const key=sameSearch?state.searchKey:sourceKey(mapsUrl);
+    if(rows().length&&state.searchKey&&state.searchKey!==key &&
+      !confirm("Hay resultados de otra búsqueda. Descargá el CSV antes: esta búsqueda reemplazará los datos guardados. ¿Continuar?"))return;
+    let limit=Number.parseInt(els.limit.value,10);
+    if(!Number.isFinite(limit)||limit<0)limit=0;
+    settings.limit=Math.min(100000,limit);
+    settings.searchQuery=query;
+    await saveSettings();
+    if(filters.searchKey!==key) {filters=blankFilters(key);await saveFilters();}
+    els.searchStart.disabled=true;
+    message(`Abriendo Google Maps para “${query}” e iniciando la extracción…`);
+    try {
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_SEARCH_AND_START",query,limit:settings.limit,country:settings.country||"auto"});
+      if(!result?.ok)throw new Error(result?.error||"No se pudo abrir la búsqueda.");
+      message("Búsqueda abierta. La extracción ya está en marcha en la nueva pestaña.");
+      await readData();
+    } catch(err) {
+      render();message("Error al iniciar la búsqueda: "+(err.message||String(err)));
+    }
+  }
+  els.searchStart.addEventListener("click",startSearchFromPopup);
+  els.searchQuery.addEventListener("input",()=>{
+    settings.searchQuery=els.searchQuery.value;
+    els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
+  });
+  els.searchQuery.addEventListener("keydown",event=>{
+    if(event.key==="Enter") {event.preventDefault();startSearchFromPopup();}
   });
   els.start.addEventListener("click",async ()=>{
     if(!pageSupported)return;

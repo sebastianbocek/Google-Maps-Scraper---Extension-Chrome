@@ -17,6 +17,12 @@
       </div>
     </header>
     <div id="page" class="page">Detectando pestaña...</div>
+    <section class="search-box" aria-label="Nueva búsqueda">
+      <label class="field-label" for="searchQuery">¿Qué negocios buscás?</label>
+      <input id="searchQuery" type="search" maxlength="180" placeholder="Ej.: cafeterías en Palermo" autocomplete="off" />
+      <button id="searchStart" class="primary">▶ Buscar y comenzar extracción</button>
+      <p>Google Maps se abrirá en una pestaña nueva.</p>
+    </section>
     <div class="stats">
       <div><b id="total">0</b><span>Detectados</span></div>
       <div><b id="phoneCount">0</b><span>Teléfonos</span></div>
@@ -28,7 +34,7 @@
       <input id="limit" type="number" min="0" max="100000" step="1" value="0" />
       <p><strong>0 = hasta que Google no muestre más.</strong> Recorre la lista y abre cada ficha para obtener los datos.</p>
     </div>
-    <button id="start" class="primary">▶ Iniciar extracción</button>
+    <button id="start" class="primary">▶ Iniciar en esta pestaña</button>
     <div class="two">
       <button id="stop" disabled>■ Detener</button>
       <button id="download" disabled>↓ Descargar CSV</button>

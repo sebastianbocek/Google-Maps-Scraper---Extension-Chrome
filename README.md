@@ -21,6 +21,7 @@
 ## Qué hace
 
 - Extrae fichas de negocios visibles en Google Maps y Google Local.
+- Permite escribir una búsqueda en el panel; abre Google Maps en una pestaña nueva e inicia la extracción.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
@@ -38,8 +39,8 @@
 3. Activa **Modo desarrollador** en la parte superior derecha.
 4. Haz clic en **Cargar descomprimida**.
 5. Selecciona la carpeta **Google Maps Scraper - Extension Chrome** que contiene `manifest.json`.
-6. Abre [Google Maps](https://www.google.com/maps) y realiza una búsqueda, por ejemplo: “cafeterías en Palermo”.
-7. Haz clic en el icono de la extensión y luego en **Iniciar extracción**. Deja que Google Maps cargue los resultados mientras la extensión recorre las fichas.
+6. Abre la extensión, escribe una búsqueda, por ejemplo “cafeterías en Palermo”, y haz clic en **Buscar y comenzar extracción**. Se abrirá Google Maps en una pestaña nueva y la extracción comenzará automáticamente.
+7. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
 8. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades y elegir una ubicación objetivo.
 9. Haz clic en **Descargar CSV**.
 

@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.3.5
+GOOGLE LOCAL → CSV  |  v1.3.6
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -14,6 +14,9 @@ INSTALAR O ACTUALIZAR
 7. Recargá la pestaña abierta de Google Maps/Locales.
 
 EXTRAER Y EXPORTAR
+- Desde el panel, escribí una búsqueda (por ejemplo, 'cafeterías en Palermo') y pulsá
+  'Buscar y comenzar extracción'. Google Maps se abrirá en una pestaña nueva y la
+  extracción comenzará automáticamente.
 - Abrí la sección Google 'Locales' (por ejemplo, 'joyeria posadas') o Google Maps.
 - Iniciá la extracción desde el icono de la extensión.
 - Máximo de fichas: 0 = sin límite predeterminado; termina cuando no encuentra
