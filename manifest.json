@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Google Local → CSV | Negocios",
   "short_name": "Locales a CSV",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Extrae negocios de Google Maps y Locales, filtra categorías, ciudades, teléfonos y sitios web, exporta CSV y abre teléfonos en WhatsApp con Alt + clic.",
   "action": {
     "default_title": "Extraer negocios a CSV",
