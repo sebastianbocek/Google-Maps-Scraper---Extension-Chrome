@@ -3,8 +3,7 @@
 body { width: 370px; margin: 0; background: #f6f8fa; color: #182d28; }
 main { padding: 16px; }
 header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-.logo { background: #103f35; color: #fff; font-size: 16px; font-weight: 800; padding: 10px; border-radius: 12px; letter-spacing: -1px; }
-.logo span { color: #72deae; }
+.logo { display: block; flex: 0 0 52px; width: 52px; height: 42px; object-fit: contain; border-radius: 12px; }
 h1 { margin: 0; font-size: 17px; line-height: 1.25; }
 header p { margin: 4px 0 0; color: #697b75; font-size: 11px; }
 header p.author { margin-top: 3px; font-size: 10px; }
