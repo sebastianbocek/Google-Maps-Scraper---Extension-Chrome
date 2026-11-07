@@ -210,13 +210,21 @@
       filters[field]=[...set];render();await saveFilters();
     });
   }
-  els.strictLocation.addEventListener("change",async ()=>{
-    filters.strictLocation=els.strictLocation.checked;filters.locationFilterTouched=true;render();await saveFilters();
-  });
+  const updateStrictLocation=async ()=>{
+    const value=els.strictLocation.checked;
+    if(filters.strictLocation===value&&filters.locationFilterTouched)return;
+    filters.strictLocation=value;filters.locationFilterTouched=true;render();await saveFilters();
+  };
+  els.strictLocation.addEventListener("input",updateStrictLocation);
+  els.strictLocation.addEventListener("change",updateStrictLocation);
   for(const field of ["websiteMode","phoneMode"]) {
-    els[field].addEventListener("change",async ()=>{
-      filters[field]=els[field].value;render();await saveFilters();
-    });
+    const updateSelect=async ()=>{
+      const value=els[field].value;
+      if(filters[field]===value)return;
+      filters[field]=value;render();await saveFilters();
+    };
+    els[field].addEventListener("input",updateSelect);
+    els[field].addEventListener("change",updateSelect);
   }
   els.targetLocation.addEventListener("input",()=>{
     filters.targetTouched=true;filters.targetLocation=els.targetLocation.value.trim();

@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.4.2
+GOOGLE LOCAL → CSV  |  v1.4.3
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -29,6 +29,7 @@ EXTRAER Y EXPORTAR
 - Antes de exportar, revisá las categorías y ubicaciones detectadas.
 - La ubicación sugerida no filtra la exportación hasta que actives 'Exportar solo la
   ubicación objetivo'.
+- El contador de fichas exportables se actualiza al cambiar cualquier filtro.
 - En 'Limpiar CSV' podés escribir un mensaje opcional para que los enlaces de WhatsApp
   del CSV lo abran prellenado. Si lo dejás vacío, se genera el enlace habitual.
 - Papelera roja: excluir esa categoría o ciudad SOLO DE LA EXPORTACIÓN.

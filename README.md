@@ -48,7 +48,7 @@
 9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
 10. Haz clic en **Descargar CSV**.
 
-La ubicación objetivo aparece como sugerencia, pero no filtra la exportación hasta que actives **Exportar solo la ubicación objetivo**. Así, la descarga normal combina únicamente los filtros que elegiste.
+El contador de fichas exportables se actualiza al cambiar los filtros. La ubicación objetivo aparece como sugerencia, pero no filtra la exportación hasta que actives **Exportar solo la ubicación objetivo**. Así, la descarga normal combina únicamente los filtros que elegiste.
 
 **Límite de fichas:** `0` no establece un máximo. La extensión sigue desplazándose mientras Maps cargue resultados; si no hay avance después de varios intentos, se pausa, guarda el progreso y permite continuar. No equivale a todos los negocios existentes en la zona.
 
