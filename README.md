@@ -32,11 +32,11 @@
 
 ## Instalación en Chrome
 
-1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela en una carpeta.
+1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela. El ZIP contiene una carpeta llamada **Google Maps Scraper - Extension Chrome**.
 2. Abre `chrome://extensions/` en Chrome.
 3. Activa **Modo desarrollador** en la parte superior derecha.
 4. Haz clic en **Cargar descomprimida**.
-5. Selecciona la carpeta descomprimida que contiene `manifest.json`.
+5. Selecciona la carpeta **Google Maps Scraper - Extension Chrome** que contiene `manifest.json`.
 6. Abre [Google Maps](https://www.google.com/maps) y realiza una búsqueda, por ejemplo: “cafeterías en Palermo”.
 7. Haz clic en el icono de la extensión y luego en **Iniciar extracción**. Deja que Google Maps cargue los resultados mientras la extensión recorre las fichas.
 8. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades y elegir una ubicación objetivo.

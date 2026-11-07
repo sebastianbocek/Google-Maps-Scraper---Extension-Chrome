@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.3
+GOOGLE LOCAL → CSV  |  v1.3.2
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -8,7 +8,7 @@ INSTALAR O ACTUALIZAR
 2. Descomprimí el ZIP en una carpeta normal de tu equipo.
 3. Abrí chrome://extensions.
 4. Activá 'Modo desarrollador' y elegí 'Cargar descomprimida'.
-5. Seleccioná la carpeta que contiene el archivo manifest.json.
+5. Seleccioná la carpeta 'Google Maps Scraper - Extension Chrome' que contiene el archivo manifest.json.
 6. Si conservás una instalación anterior de esta extensión, reemplazá los archivos
    en la misma carpeta original y pulsá 'Recargar' para conservar su instalación.
 7. Recargá la pestaña abierta de Google Maps/Locales.

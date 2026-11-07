@@ -7,6 +7,9 @@ header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .logo span { color: #72deae; }
 h1 { margin: 0; font-size: 17px; line-height: 1.25; }
 header p { margin: 4px 0 0; color: #697b75; font-size: 11px; }
+header p.author { margin-top: 3px; font-size: 10px; }
+header p.author a { color: #0e7453; text-decoration: none; }
+header p.author a:hover { text-decoration: underline; }
 .page { background: #e7f0eb; border: 1px solid #d4e6dc; border-radius: 9px; padding: 10px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 12px; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
 .stats > div { border-radius: 10px; background: white; box-shadow: 0 1px 4px #16322910; text-align: center; padding: 12px 6px; display: flex; flex-direction: column; gap: 3px; }
