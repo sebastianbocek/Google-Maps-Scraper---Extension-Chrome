@@ -26,7 +26,7 @@ EXTRAER Y EXPORTAR
   elimina del CSV las fichas de otras ciudades o sin ciudad verificable.
 - 'Sitio web' y 'Teléfono': elegí todos los negocios, solo los que tienen el dato,
   o solo los que no lo tienen. Los filtros se aplican únicamente al CSV exportado.
-- Descargá el CSV con: nombre, telefono, rating, categoria, website, whatsapp_link.
+- Descargá el CSV con: nombre, telefono, rating, categoria, website, whatsapp_link, url_negocio.
 - Cuando una ficha no proporciona un dato, ese campo queda vacío.
 
 TELÉFONO → WHATSAPP EN UN CLIC

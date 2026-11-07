@@ -218,6 +218,12 @@
     }
     return best.score >= 3 ? best.url : "";
   }
+  function businessUrl(root) {
+    if (!root) return "";
+    const selector='a.hfpxzc, a[href*="/maps/place/"], a[href*="cid="]';
+    const link=root.matches(selector)?root:root.querySelector(selector);
+    return unwrapUrl(link?.getAttribute("href") || "");
+  }
   function getCardName(root) {
     for (const node of root.querySelectorAll(SELECTORS.names)) {
       const val = plain(node.getAttribute("aria-label") || safeText(node));
@@ -256,7 +262,7 @@
       const key = cardKey(root,name);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({name, key, element:root, phone:phoneFromNode(root), rating:findRating(root), website:externalWebsite(root), category:findCategory(root), address:findAddress(root)});
+      out.push({name, key, element:root, phone:phoneFromNode(root), rating:findRating(root), website:externalWebsite(root), businessUrl:businessUrl(root), category:findCategory(root), address:findAddress(root)});
     }
     return out;
   }
@@ -352,12 +358,12 @@
     const address=card.address || "";
     const location=utils.locality(address);
     return {id:card.key, name:card.name, phone:card.phone || "", rating:card.rating || "",
-      category:card.category || "", website:card.website || "", address, location,
+      category:card.category || "", website:card.website || "", businessUrl:card.businessUrl || "", address, location,
       whatsappLink:whatsapp(card.phone || "", country, address, searchUrl)};
   }
   function combineRow(oldRow, latest, country, searchUrl) {
     const merged={...oldRow};
-    for (const key of ["name","phone","rating","category","website"])
+    for (const key of ["name","phone","rating","category","website","businessUrl"])
       if (!merged[key] && latest[key]) merged[key]=latest[key];
     // Priorizar la dirección del panel completo frente al snippet de la lista.
     if (latest.address && (!merged.address || latest.address.length>merged.address.length))

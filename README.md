@@ -21,10 +21,11 @@
 ## Qué hace
 
 - Extrae fichas de negocios visibles en Google Maps y Google Local.
-- Guarda nombre, teléfono, valoración, categoría, sitio web y enlace de WhatsApp cuando están disponibles.
+- Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
+- Añade la columna `url_negocio` con el enlace a la ficha de cada negocio en Google Maps.
 - Abre WhatsApp Web para un teléfono con `Alt` + clic sobre el número en Google Maps.
 - Procesa y guarda los datos localmente en Chrome; no los envía a un servidor externo.
 
