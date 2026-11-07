@@ -3,7 +3,7 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","downloadAll","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
@@ -68,6 +68,18 @@
   function buildCsv(items) {
     const header=["nombre","telefono","rating","categoria","website","whatsapp_link","url_negocio"];
     return "\uFEFF"+[header,...items.map(rowCsv)].map(r=>r.map(csvCell).join(",")).join("\r\n")+"\r\n";
+  }
+  async function downloadCsv(items,ignoreFilters) {
+    const q=util.fromSearch(state.searchUrl)||"google_maps";
+    const suffix=new Date().toISOString().slice(0,10);
+    const blob=new Blob([buildCsv(items)],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    try {
+      await chrome.downloads.download({url,filename:`negocios_${fileSlug(q)}_${suffix}.csv`,saveAs:true,conflictAction:"uniquify"});
+      message(ignoreFilters
+        ? `CSV preparado: ${items.length} fichas. Se ignoraron los filtros actuales.`
+        : `CSV preparado: ${items.length} de ${rows().length} fichas. Excluidas: ${rows().length-items.length}.`);
+    } finally {setTimeout(()=>URL.revokeObjectURL(url),60000);}
   }
   function fileSlug(input) {
     return (input||"negocios").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
@@ -144,6 +156,8 @@
     els.start.disabled=!pageSupported || state.status==="running";
     els.stop.disabled=state.status!=="running";
     els.download.disabled=kept.length===0;
+    els.downloadAll.hidden=data.length===0 || kept.length>0;
+    els.downloadAll.textContent=`↓ Descargar los ${data.length} resultados sin filtros`;
     els.limit.disabled=state.status==="running";
     els.country.disabled=state.status==="running";
     els.searchQuery.disabled=state.status==="running";
@@ -307,14 +321,14 @@
     try {
       const selected=includedRows();
       if(!selected.length) {message("No hay fichas que cumplan los filtros.");return;}
-      const q=util.fromSearch(state.searchUrl)||"google_maps";
-      const suffix=new Date().toISOString().slice(0,10);
-      const blob=new Blob([buildCsv(selected)],{type:"text/csv;charset=utf-8"});
-      const url=URL.createObjectURL(blob);
-      try {
-        await chrome.downloads.download({url,filename:`negocios_${fileSlug(q)}_${suffix}.csv`,saveAs:true,conflictAction:"uniquify"});
-        message(`CSV preparado: ${selected.length} de ${rows().length} fichas. Excluidas: ${rows().length-selected.length}.`);
-      } finally {setTimeout(()=>URL.revokeObjectURL(url),60000);}
+      await downloadCsv(selected,false);
+    } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
+  });
+  els.downloadAll.addEventListener("click",async ()=>{
+    try {
+      const all=rows();
+      if(!all.length)return;
+      await downloadCsv(all,true);
     } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
   });
   els.clear.addEventListener("click",async ()=>{

@@ -48,6 +48,8 @@
 9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
 10. Haz clic en **Descargar CSV**.
 
+Si el contador muestra `0 / N`, los filtros actuales están excluyendo todas las fichas. Aparecerá **Descargar los N resultados sin filtros** para recuperar el CSV completo sin borrar ni modificar esos filtros.
+
 **Límite de fichas:** `0` no establece un máximo. La extensión sigue desplazándose mientras Maps cargue resultados; si no hay avance después de varios intentos, se pausa, guarda el progreso y permite continuar. No equivale a todos los negocios existentes en la zona.
 
 ## Cómo ayuda en la prospección freelance
