@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.5.0
+GOOGLE LOCAL → CSV  |  v1.5.2
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -32,6 +32,8 @@ EXTRAER Y EXPORTAR
   varios intentos de desplazamiento, la extracción se pausa y podés continuar.
 - La extracción guarda avances y se puede detener o continuar.
 - Antes de exportar, revisá las categorías y ubicaciones detectadas.
+- Para el filtro de sitio web, Instagram y Facebook cuentan como 'sin sitio web';
+  sus enlaces originales se conservan en el CSV.
 - La ubicación sugerida no filtra la exportación hasta que actives 'Exportar solo la
   ubicación objetivo'.
 - El contador de fichas exportables se actualiza al cambiar cualquier filtro.

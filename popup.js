@@ -34,6 +34,7 @@
   const rows=()=>Array.isArray(state.rows)?state.rows:[];
   function rowLocation(row) {return (row.location || util.locality(row.address || "") || "").trim();}
   function rowCategory(row) {return (row.category||"").trim();}
+  function hasRealWebsite(row) {return Boolean(String(row.website||"").trim())&&!util.isSocialWebsite(row.website);}
   function groupKey(s) {return util.norm(s)||UNKNOWN;}
   function groups(items,getValue) {
     const g=new Map();
@@ -60,7 +61,7 @@
     const websiteMode=filters.websiteMode||"all",phoneMode=filters.phoneMode||"all";
     return rows().filter(row=>!badCats.has(groupKey(rowCategory(row))) &&
       !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity) &&
-      (websiteMode==="all" || (websiteMode==="with" ? Boolean(String(row.website||"").trim()) : !String(row.website||"").trim())) &&
+      (websiteMode==="all" || (websiteMode==="with" ? hasRealWebsite(row) : !hasRealWebsite(row))) &&
       (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
   }
   function rowCsv(row) {
@@ -134,7 +135,7 @@
     renderLog(state.logs);
     els.total.textContent=String(data.length);
     els.phoneCount.textContent=String(data.filter(r=>r.phone).length);
-    els.webCount.textContent=String(data.filter(r=>r.website).length);
+    els.webCount.textContent=String(data.filter(hasRealWebsite).length);
     const cGroups=groups(data,rowCategory), lGroups=groups(data,rowLocation);
     els.categoryCount.textContent=String(cGroups.length);
     els.locationCount.textContent=String(lGroups.length);

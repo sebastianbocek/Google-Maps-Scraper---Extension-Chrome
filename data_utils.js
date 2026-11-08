@@ -119,6 +119,19 @@
     const text=String(message||"").trim();
     return `https://web.whatsapp.com/send?phone=${number}${text?`&text=${encodeURIComponent(text)}`:""}`;
   }
+  function isSocialWebsite(value) {
+    const raw=String(value??"").trim();
+    if(!raw)return false;
+    if(/^(?:instagram|facebook)(?:\s|:|$)/i.test(raw))return true;
+    try {
+      const candidate=/^[a-z][a-z\d+.-]*:\/\//i.test(raw)?raw:`https://${raw.replace(/^\/\//,"")}`;
+      const host=new URL(candidate).hostname.toLowerCase().replace(/^www\d*\./,"");
+      return ["instagram.com","instagr.am","facebook.com","fb.com","fb.watch"]
+        .some(domain=>host===domain||host.endsWith(`.${domain}`));
+    } catch {
+      return /(?:instagram\.com|instagr\.am|facebook\.com|fb\.com|fb\.watch)/i.test(raw);
+    }
+  }
   function suggestedTarget(rows,searchUrl) {
     const query=norm(fromSearch(searchUrl));
     const groups=[...new Set((rows||[]).map(r=>r.location||locality(r.address)).filter(Boolean))];
@@ -135,5 +148,5 @@
     const tail=query.match(/(?:\b(?:en|cerca de|near|in)\s+)([a-z\s]{3,45})$/);
     return tail ? tail[1].trim() : "";
   }
-  globalThis.GLCSVUtil = Object.freeze({norm, inferCountry, fromSearch, cleanAddress, locality, normalizePhone, whatsapp, suggestedTarget});
+  globalThis.GLCSVUtil = Object.freeze({norm, inferCountry, fromSearch, cleanAddress, locality, normalizePhone, whatsapp, isSocialWebsite, suggestedTarget});
 })();

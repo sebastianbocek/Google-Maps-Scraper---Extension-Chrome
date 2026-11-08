@@ -82,6 +82,7 @@
     return findPhoneInText(scope.innerText || "");
   }
   const utils = globalThis.GLCSVUtil;
+  const hasRealWebsite = value => Boolean(String(value||"").trim()) && !utils?.isSocialWebsite(value);
   function whatsapp(raw, country = "auto", place = "", searchUrl = "") {
     return utils?.whatsapp(raw, country, place, searchUrl) || "";
   }
@@ -476,8 +477,8 @@
           queryProcessed++;
           state.rows=[...rows.values()];
           state.inspectedIds=[...inspected];
-          state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>r.website).length} webs`;
-          logEvent(state,"info","Ficha guardada",{name:card.name,total:rows.size,phone:Boolean(add.phone),website:Boolean(add.website),businessUrl:Boolean(add.businessUrl)});
+          state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>hasRealWebsite(r.website)).length} webs`;
+          logEvent(state,"info","Ficha guardada",{name:card.name,total:rows.size,phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
           state.updatedAt=Date.now();
           await writeState(state);
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
