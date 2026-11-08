@@ -24,6 +24,7 @@
 - Permite escribir una búsqueda en el panel; abre Google Maps en una pestaña nueva e inicia la extracción.
 - Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
+- Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
 - Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas.

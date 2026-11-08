@@ -32,6 +32,12 @@
     } catch { return false; }
   }
   const rows=()=>Array.isArray(state.rows)?state.rows:[];
+  function normalizeState(value) {
+    const next=value||initial();
+    if(!Array.isArray(next.rows))return next;
+    const unique=util.dedupeRows(next.rows);
+    return unique.length===next.rows.length?next:{...next,rows:unique};
+  }
   function rowLocation(row) {return (row.location || util.locality(row.address || "") || "").trim();}
   function rowCategory(row) {return (row.category||"").trim();}
   function hasRealWebsite(row) {return Boolean(String(row.website||"").trim())&&!util.isSocialWebsite(row.website);}
@@ -59,7 +65,7 @@
     const badCats=new Set(filters.excludedCategories||[]),badCities=new Set(filters.excludedLocations||[]);
     const targetCity=filters.strictLocation?target():"";
     const websiteMode=filters.websiteMode||"all",phoneMode=filters.phoneMode||"all";
-    return rows().filter(row=>!badCats.has(groupKey(rowCategory(row))) &&
+    return util.dedupeRows(rows()).filter(row=>!badCats.has(groupKey(rowCategory(row))) &&
       !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity) &&
       (websiteMode==="all" || (websiteMode==="with" ? hasRealWebsite(row) : !hasRealWebsite(row))) &&
       (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
@@ -81,7 +87,7 @@
     const campaignQuery=state.campaignId&&campaignState.id===state.campaignId?campaignState.business:"";
     const q=campaignQuery||util.fromSearch(state.searchUrl)||"google_maps";
     const suffix=new Date().toISOString().slice(0,10);
-    const blob=new Blob([buildCsv(items)],{type:"text/csv;charset=utf-8"});
+    const blob=new Blob([buildCsv(util.dedupeRows(items))],{type:"text/csv;charset=utf-8"});
     const url=URL.createObjectURL(blob);
     try {
       await chrome.downloads.download({url,filename:`negocios_${fileSlug(q)}_${suffix}.csv`,saveAs:true,conflictAction:"uniquify"});
@@ -192,7 +198,7 @@
   }
   async function readData() {
     const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
-    state=stored[STATE_KEY]||initial();
+    state=normalizeState(stored[STATE_KEY]);
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
     if(typeof filters.locationFilterTouched!=="boolean") {
@@ -426,7 +432,7 @@
   chrome.storage.onChanged.addListener((changes,area)=>{
     if(area!=="local")return;
     if(changes[STATE_KEY]) {
-      state=changes[STATE_KEY].newValue||initial();
+      state=normalizeState(changes[STATE_KEY].newValue);
       if(filters.searchKey!==state.searchKey)filters=blankFilters(state.searchKey);
     }
     if(changes[FILTER_KEY])filters=changes[FILTER_KEY].newValue||blankFilters(state.searchKey);

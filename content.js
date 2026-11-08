@@ -234,11 +234,15 @@
     return "";
   }
   function cardKey(root, name) {
-    const dataId = root.getAttribute("data-cid") || root.getAttribute("data-id") || root.querySelector('[data-cid],[data-id]')?.getAttribute("data-cid") || "";
-    if (dataId) return `data:${dataId}`;
+    const dataId = root.getAttribute("data-cid") || root.querySelector('[data-cid]')?.getAttribute("data-cid") || "";
+    if (dataId) return utils.placeIdentity(`data:${dataId}`) || `data:${canonical(dataId)}`;
     const link = root.querySelector('a.hfpxzc, a[href*="/maps/place/"],a[href*="cid="]');
     const raw = link?.getAttribute("href") || "";
-    if (raw.includes("/maps/place/") || raw.includes("cid=")) return `map:${raw.split("?")[0]}`;
+    const place = utils.placeIdentity(unwrapUrl(raw));
+    if (place) return place;
+    const address=findAddress(root), phone=phoneFromNode(root);
+    const identity=utils.businessIdentity({name,address,phone});
+    if (address||phone) return identity;
     const snippet = safeText(root).slice(0,130);
     return `name:${canonical(name)}|${canonical(snippet)}`;
   }
@@ -363,15 +367,32 @@
       whatsappLink:whatsapp(card.phone || "", country, address, searchUrl)};
   }
   function combineRow(oldRow, latest, country, searchUrl) {
-    const merged={...oldRow};
-    for (const key of ["name","phone","rating","category","website","businessUrl"])
-      if (!merged[key] && latest[key]) merged[key]=latest[key];
+    const merged=utils.mergeBusinessRows(oldRow,latest);
     // Priorizar la dirección del panel completo frente al snippet de la lista.
     if (latest.address && (!merged.address || latest.address.length>merged.address.length))
       merged.address=latest.address;
     merged.location=utils.locality(merged.address || "") || latest.location || merged.location || "";
     merged.whatsappLink=whatsapp(merged.phone, country, merged.address || merged.location, searchUrl);
     return merged;
+  }
+  function findDuplicateRow(rows,candidate) {
+    if(candidate.id&&rows.has(candidate.id))return candidate.id;
+    for(const [key,row] of rows)if(utils.sameBusiness(row,candidate))return key;
+    return "";
+  }
+  function storeUniqueRow(rows,candidate,country,searchUrl) {
+    const oldKey=findDuplicateRow(rows,candidate);
+    if(!oldKey) {
+      const key=utils.businessIdentity(candidate)||candidate.id;
+      rows.set(key,{...candidate,id:key});
+      return {key,duplicate:false};
+    }
+    const old=rows.get(oldKey);
+    const merged=combineRow(old,candidate,country,searchUrl);
+    const key=utils.businessIdentity(merged)||oldKey;
+    if(key!==oldKey)rows.delete(oldKey);
+    rows.set(key,{...merged,id:key});
+    return {key,duplicate:true};
   }
   function getScrollTarget(cards) {
     const first=cards.find(card=>card.element?.isConnected)?.element||null;
@@ -432,12 +453,16 @@
     const sameCampaign=Boolean(campaignId&&existing.campaignId===campaignId&&Array.isArray(existing.rows));
     const sameCampaignQuery=sameCampaign&&existing.campaignQuery===campaignQuery;
     const saved=campaignId?(sameCampaign?existing.rows:[]):(canResume?existing.rows:[]);
-    const rows=new Map(saved.map(row=>[row.id || `name:${canonical(row.name)}`,row]));
+    const rows=new Map();
+    for(const row of utils.dedupeRows(saved))storeUniqueRow(rows,row,country,searchUrl);
     // Datos previos a 1.2 no guardaban ubicación: revisar una vez sus fichas.
-    const inspected=new Set((campaignId?sameCampaignQuery:canResume) && existing.schemaVersion===2 ?
+    const inspected=new Set((campaignId?sameCampaignQuery:canResume) && Number(existing.schemaVersion)>=2 ?
       (existing.inspectedIds || saved.map(row=>row.id)).filter(Boolean) : []);
-    let queryProcessed=campaignId?(sameCampaignQuery?inspected.size:0):rows.size;
-    const state={rows:[...rows.values()], inspectedIds:[...inspected], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:2, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const previousQueryRows=sameCampaignQuery&&Array.isArray(existing.queryRows)?existing.queryRows:
+      (!campaignId&&canResume?(Array.isArray(existing.queryRows)?existing.queryRows:saved):[]);
+    const queryRows=utils.dedupeRows(previousQueryRows);
+    let queryProcessed=queryRows.length;
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:3, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
     logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
@@ -472,13 +497,16 @@
             if (detailWebsite) add.website=detailWebsite;
             if (detailCategory) add.category=detailCategory;
           }
-          const old=rows.get(card.key);
-          rows.set(card.key,old?combineRow(old,add,country,searchUrl):add);
-          queryProcessed++;
+          const queryIndex=queryRows.findIndex(row=>utils.sameBusiness(row,add));
+          const duplicateInQuery=queryIndex>=0;
+          if(duplicateInQuery)queryRows[queryIndex]=combineRow(queryRows[queryIndex],add,country,searchUrl);
+          else {queryRows.push({...add,id:utils.businessIdentity(add)||add.id});queryProcessed++;}
+          const stored=storeUniqueRow(rows,add,country,searchUrl);
           state.rows=[...rows.values()];
+          state.queryRows=queryRows;
           state.inspectedIds=[...inspected];
           state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>hasRealWebsite(r.website)).length} webs`;
-          logEvent(state,"info","Ficha guardada",{name:card.name,total:rows.size,phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
+          logEvent(state,duplicateInQuery||stored.duplicate?"warn":"info",duplicateInQuery||stored.duplicate?"Ficha duplicada omitida":"Ficha guardada",{name:card.name,total:rows.size,duplicatesSkipped:duplicateInQuery||stored.duplicate,phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
           state.updatedAt=Date.now();
           await writeState(state);
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
@@ -515,6 +543,7 @@
       logEvent(state,"error",state.message,{stack:String(err?.stack||"").slice(0,1800),iterations,rows:rows.size});
     } finally {
       state.rows=[...rows.values()];
+      state.queryRows=queryRows;
       state.inspectedIds=[...inspected];
       state.updatedAt=Date.now();
       await writeState(state).catch(()=>{});

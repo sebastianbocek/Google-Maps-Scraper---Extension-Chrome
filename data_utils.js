@@ -148,5 +148,71 @@
     const tail=query.match(/(?:\b(?:en|cerca de|near|in)\s+)([a-z\s]{3,45})$/);
     return tail ? tail[1].trim() : "";
   }
-  globalThis.GLCSVUtil = Object.freeze({norm, inferCountry, fromSearch, cleanAddress, locality, normalizePhone, whatsapp, isSocialWebsite, suggestedTarget});
+  function placeIdentity(value) {
+    const raw=String(value??"").trim();
+    if(!raw)return "";
+    const cid=raw.match(/(?:^|[?&])cid=([^&#]+)/i)?.[1] || raw.match(/^data:(.+)$/i)?.[1] || "";
+    if(cid && /^[\da-fx:]+$/i.test(cid))return `place:${cid.toLowerCase()}`;
+    try {
+      const u=new URL(raw,globalThis.location?.href||"https://www.google.com/maps/");
+      const queryId=u.searchParams.get("cid")||u.searchParams.get("place_id");
+      if(queryId)return `place:${queryId.toLowerCase()}`;
+      const decoded=decodeURIComponent(`${u.pathname} ${u.search}`).replace(/&amp;/g,"&");
+      const token=decoded.match(/(?:!1s|!16s)(0x[\da-f]+:0x[\da-f]+|ChIJ[\w-]+)/i)?.[1];
+      if(token)return `place:${token.toLowerCase()}`;
+      const cidToken=decoded.match(/0x[\da-f]+:0x[\da-f]+/i)?.[0];
+      if(cidToken)return `place:${cidToken.toLowerCase()}`;
+    } catch {}
+    return "";
+  }
+  const identityText=value=>norm(value).replace(/[^\p{L}\p{N}]+/gu," ").trim();
+  function businessIdentity(row={}) {
+    const place=placeIdentity(row.businessUrl)||placeIdentity(row.id);
+    if(place)return place;
+    const name=identityText(row.name);
+    const address=identityText(cleanAddress(row.address||row.location||""));
+    const phone=String(row.phone||"").replace(/\D/g,"");
+    if(name&&address)return `business:${name}|address:${address}`;
+    if(name&&phone)return `business:${name}|phone:${phone}`;
+    if(name)return `business:${name}`;
+    return String(row.id||"");
+  }
+  function sameBusiness(a={},b={}) {
+    const aPlace=placeIdentity(a.businessUrl)||placeIdentity(a.id);
+    const bPlace=placeIdentity(b.businessUrl)||placeIdentity(b.id);
+    if(aPlace&&bPlace)return aPlace===bPlace;
+    const aName=identityText(a.name), bName=identityText(b.name);
+    if(!aName||aName!==bName)return false;
+    const aAddress=identityText(cleanAddress(a.address||a.location||""));
+    const bAddress=identityText(cleanAddress(b.address||b.location||""));
+    if(aAddress&&bAddress&&aAddress!==bAddress)return false;
+    const aPhone=String(a.phone||"").replace(/\D/g,"");
+    const bPhone=String(b.phone||"").replace(/\D/g,"");
+    if(aPhone&&bPhone&&aPhone!==bPhone&&!aAddress&&!bAddress)return false;
+    if(aAddress&&bAddress&&aAddress===bAddress)return true;
+    if(aPhone&&bPhone&&aPhone===bPhone)return true;
+    // If one card has not exposed address/phone yet, merge only when the
+    // other available identifiers do not contradict it.
+    return (!aAddress||!bAddress)&&(!aPhone||!bPhone)&&(!aAddress||!bPhone||aPhone===bPhone)&&(!bAddress||!aPhone||aPhone===bPhone);
+  }
+  function mergeBusinessRows(oldRow={},latest={}) {
+    const merged={...oldRow};
+    for(const [key,value] of Object.entries(latest)) {
+      if((merged[key]===undefined||merged[key]===null||merged[key]==="")&&value!==undefined&&value!==null&&value!=="")merged[key]=value;
+    }
+    if(latest.address&&(!oldRow.address||String(latest.address).length>String(oldRow.address).length))merged.address=latest.address;
+    if(latest.placeId||placeIdentity(latest.businessUrl)||placeIdentity(latest.id))merged.id=latest.id||businessIdentity(latest);
+    else merged.id=businessIdentity(merged)||oldRow.id||latest.id;
+    return merged;
+  }
+  function dedupeRows(input) {
+    const unique=[];
+    for(const row of Array.isArray(input)?input:[]) {
+      const index=unique.findIndex(existing=>sameBusiness(existing,row));
+      if(index<0)unique.push({...row,id:businessIdentity(row)||row.id||""});
+      else unique[index]=mergeBusinessRows(unique[index],row);
+    }
+    return unique;
+  }
+  globalThis.GLCSVUtil = Object.freeze({norm, inferCountry, fromSearch, cleanAddress, locality, normalizePhone, whatsapp, isSocialWebsite, suggestedTarget, placeIdentity, businessIdentity, sameBusiness, mergeBusinessRows, dedupeRows});
 })();
