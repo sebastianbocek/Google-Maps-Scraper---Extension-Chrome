@@ -17,8 +17,8 @@ EXTRAER Y EXPORTAR
 - Desde el panel, escribí una búsqueda (por ejemplo, 'cafeterías en Palermo') y pulsá
   'Buscar y comenzar extracción'. Google Maps se abrirá en una pestaña nueva y la
   extracción comenzará automáticamente.
-- Debajo está 'Búsqueda por varias ciudades': escribí el rubro y elegí una o más
-  provincias argentinas. La campaña recorre las ciudades seleccionadas de a una y
+- Debajo está 'Búsqueda por varias ciudades': escribí el rubro y marcá una o más
+  provincias argentinas. Desmarcá una casilla para quitarla. La campaña recorre las ciudades de a una y
   acumula los resultados. Sin provincias, busca el rubro en toda Argentina.
 - La campaña avanza a la siguiente ciudad al terminar los resultados de la actual.
   Podés pausarla y continuarla desde el progreso guardado.

@@ -15,7 +15,10 @@
   let loading=true;
   const UNKNOWN="__unknown__";
   for(const province of Object.keys(globalThis.GLCSVLocations||{})) {
-    const option=document.createElement("option");option.value=province;option.textContent=province;els.campaignProvinces.appendChild(option);
+    const label=document.createElement("label");label.className="province-option";
+    const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=province;
+    const name=document.createElement("span");name.textContent=province;
+    label.append(checkbox,name);els.campaignProvinces.appendChild(label);
   }
   function sourceKey(url) {
     try { const u=new URL(url); return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q")||u.searchParams.get("query")||""}&udm=${u.searchParams.get("udm")||""}`; }
@@ -150,9 +153,9 @@
     if(document.activeElement!==els.searchQuery) els.searchQuery.value=settings.searchQuery||"";
     if(document.activeElement!==els.campaignQuery) els.campaignQuery.value=settings.campaignQuery||"";
     if(document.activeElement!==els.campaignCountry) els.campaignCountry.value=settings.campaignCountry||"AR";
-    if(document.activeElement!==els.campaignProvinces) {
+    if(!els.campaignProvinces.contains(document.activeElement)) {
       const selected=new Set(settings.campaignProvinces||[]);
-      for(const option of els.campaignProvinces.options)option.selected=selected.has(option.value);
+      for(const checkbox of els.campaignProvinces.querySelectorAll('input[type="checkbox"]'))checkbox.checked=selected.has(checkbox.value);
     }
     const campaignRunning=campaignState.status==="running"||campaignState.status==="starting";
     const campaignPaused=campaignState.status==="paused";
@@ -162,7 +165,7 @@
     els.campaignStart.disabled=campaignRunning||state.status==="running"||!els.campaignQuery.value.trim();
     els.campaignQuery.disabled=campaignRunning;
     els.campaignCountry.disabled=campaignRunning;
-    els.campaignProvinces.disabled=campaignRunning;
+    for(const checkbox of els.campaignProvinces.querySelectorAll('input[type="checkbox"]'))checkbox.disabled=campaignRunning;
     els.campaignPause.hidden=!campaignRunning;
     els.campaignResume.hidden=!campaignPaused;
     els.campaignResume.disabled=campaignPaused&&state.status==="running";
@@ -228,7 +231,7 @@
   async function saveCampaignForm() {
     settings.campaignQuery=els.campaignQuery.value.trim();
     settings.campaignCountry=els.campaignCountry.value;
-    settings.campaignProvinces=[...els.campaignProvinces.selectedOptions].map(option=>option.value);
+    settings.campaignProvinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
     await saveSettings();
   }
   for(const list of [els.categories,els.locations]) {
@@ -315,7 +318,7 @@
     const query=els.campaignQuery.value.trim();
     if(!query)return;
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción activa antes de iniciar una campaña.");return;}
-    const provinces=[...els.campaignProvinces.selectedOptions].map(option=>option.value);
+    const provinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
     const locations=globalThis.GLCSVLocations||{};
     const queries=provinces.length
       ? provinces.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, Argentina` })))

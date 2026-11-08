@@ -19,8 +19,12 @@ header p.author a:hover { text-decoration: underline; }
 .campaign-box h2 { margin: 0 0 5px; font-size: 14px; }
 .campaign-intro { margin: 0; color: #687971; font-size: 10.5px; line-height: 1.45; }
 .campaign-box input[type="search"],.campaign-box select { width: 100%; }
-.campaign-box select[multiple] { height: 112px; padding: 3px; }
-.campaign-box select[multiple] option { padding: 4px 6px; }
+.province-list { height: 132px; overflow-y: auto; border: 1px solid #cbd8d0; border-radius: 7px; background: #fff; padding: 4px; }
+.province-option { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 5px; color: #28483c; font-size: 11px; line-height: 1.3; cursor: pointer; }
+.province-option:hover { background: #eef5f1; }
+.province-option input { flex: 0 0 auto; margin: 0; accent-color: #127657; }
+.province-option:has(input:checked) { background: #eaf5ef; font-weight: 650; }
+.province-option input:disabled { cursor: not-allowed; }
 .campaign-box .primary { margin-top: 10px; }
 .campaign-controls { margin-top: 8px; }
 .campaign-controls button { flex: 1; }

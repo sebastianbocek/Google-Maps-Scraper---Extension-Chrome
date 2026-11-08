@@ -32,8 +32,8 @@
       <label class="field-label" for="campaignCountry">País</label>
       <select id="campaignCountry"><option value="AR">Argentina</option></select>
       <label class="field-label" for="campaignProvinces">Provincias o estados (opcional)</label>
-      <select id="campaignProvinces" multiple size="5" aria-describedby="campaignProvinceHint"></select>
-      <p id="campaignProvinceHint" class="hint">Seleccioná una o más provincias. En computadora, usá Ctrl o Cmd para elegir varias. Si no elegís ninguna, se buscará en toda Argentina. El máximo de fichas se aplica a cada ciudad.</p>
+      <div id="campaignProvinces" class="province-list" role="group" aria-label="Provincias de Argentina" aria-describedby="campaignProvinceHint"></div>
+      <p id="campaignProvinceHint" class="hint">Marcá las provincias que quieras incluir; volvé a tocar una casilla para quitarla. Si no marcás ninguna, se buscará en toda Argentina. El máximo de fichas se aplica a cada ciudad.</p>
       <button id="campaignStart" class="primary">▶ Iniciar búsqueda por ciudades</button>
       <div class="two campaign-controls">
         <button id="campaignPause" hidden>Ⅱ Pausar campaña</button>
