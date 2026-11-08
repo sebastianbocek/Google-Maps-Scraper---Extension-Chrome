@@ -424,32 +424,36 @@
     logs.push({time:new Date().toISOString(),level,event,details});
     state.logs=logs.slice(-MAX_LOG_ENTRIES);
   }
-  async function scan({limit,searchUrl,tabId,country}) {
+  async function scan({limit,searchUrl,tabId,country,campaignId,campaignQuery}) {
     let existing=(await chrome.storage.local.get(STATE_KEY))[STATE_KEY] || {};
     const key=sourceKey(searchUrl);
     const canResume=existing.searchKey===key && Array.isArray(existing.rows);
-    const saved=canResume ? existing.rows : [];
+    const sameCampaign=Boolean(campaignId&&existing.campaignId===campaignId&&Array.isArray(existing.rows));
+    const sameCampaignQuery=sameCampaign&&existing.campaignQuery===campaignQuery;
+    const saved=campaignId?(sameCampaign?existing.rows:[]):(canResume?existing.rows:[]);
     const rows=new Map(saved.map(row=>[row.id || `name:${canonical(row.name)}`,row]));
     // Datos previos a 1.2 no guardaban ubicación: revisar una vez sus fichas.
-    const inspected=new Set(canResume && existing.schemaVersion===2 ?
+    const inspected=new Set((campaignId?sameCampaignQuery:canResume) && existing.schemaVersion===2 ?
       (existing.inspectedIds || saved.map(row=>row.id)).filter(Boolean) : []);
-    const state={rows:[...rows.values()], inspectedIds:[...inspected], logs:canResume&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:2, updatedAt:Date.now()};
-    logEvent(state,"info",canResume?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId});
+    let queryProcessed=campaignId?(sameCampaignQuery?inspected.size:0):rows.size;
+    const state={rows:[...rows.values()], inspectedIds:[...inspected], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:2, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
     let iterations=0;
+    let finishReason="error";
     try {
-      while (!stopped && (limit===0 || rows.size < limit) && noProgress < MAX_NO_PROGRESS && iterations < 10000) {
+      while (!stopped && (limit===0 || queryProcessed < limit) && noProgress < MAX_NO_PROGRESS && iterations < 10000) {
         iterations++;
         const cards=selectCards();
         const pending=cards.filter(c=>!inspected.has(c.key));
         let count=0;
         for (const card of pending) {
-          if (stopped || (limit>0 && rows.size>=limit)) break;
+          if (stopped || (limit>0 && queryProcessed>=limit)) break;
           if (!card.element.isConnected) continue;
           inspected.add(card.key);
-          state.message=`Abriendo ficha ${rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
+          state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
           showOverlay(state.message);
           const clicked=clickCard(card);
           const panel=clicked ? await waitForPanel(card.name) : null;
@@ -469,6 +473,7 @@
           }
           const old=rows.get(card.key);
           rows.set(card.key,old?combineRow(old,add,country,searchUrl):add);
+          queryProcessed++;
           state.rows=[...rows.values()];
           state.inspectedIds=[...inspected];
           state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>r.website).length} webs`;
@@ -479,7 +484,7 @@
           count++;
           if (!stopped) await wait(750);
         }
-        if (stopped || (limit>0 && rows.size>=limit)) break;
+        if (stopped || (limit>0 && queryProcessed>=limit)) break;
         state.message=`Buscando más resultados... (${rows.size} guardados)`;
         await writeState(state);
         showOverlay(state.message);
@@ -493,9 +498,10 @@
         await writeState(state);
         showOverlay(state.message);
       }
-      const limitReached=limit>0&&rows.size>=limit;
+      const limitReached=limit>0&&queryProcessed>=limit;
       const needsContinue=!stopped&&!limitReached&&(noProgress>=MAX_NO_PROGRESS||iterations>=10000);
       state.status=stopped||needsContinue?"paused":"complete";
+      finishReason=stopped?"manual":needsContinue?"exhausted":limitReached?"limit":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
         limitReached?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
         needsContinue?`Pausado: Maps no cargó nuevos resultados tras ${noProgress} intentos. ${rows.size} fichas guardadas; podés continuar.`:
@@ -503,6 +509,7 @@
       logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,stopped,rows:rows.size});
     } catch(err) {
       state.status="error";
+      finishReason="error";
       state.message=`Interrumpido: ${err?.message || err}. Los ${rows.size} resultados guardados siguen disponibles.`;
       logEvent(state,"error",state.message,{stack:String(err?.stack||"").slice(0,1800),iterations,rows:rows.size});
     } finally {
@@ -516,6 +523,7 @@
       running=false;
       currentRun=null;
       stopped=false;
+      if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {
@@ -526,7 +534,7 @@
       const parsedLimit=Number(message.limit);
       const limit=Number.isInteger(parsedLimit) && parsedLimit>=0 ? within(parsedLimit,0,100000) : 0;
       currentRun=scan({limit,searchUrl:message.searchUrl || location.href,tabId:message.tabId,
-        country:message.country || "auto"});
+        country:message.country || "auto",campaignId:message.campaignId||"",campaignQuery:message.campaignQuery||""});
       sendResponse({ok:true});
     } else if (message?.type==="GLCSV_STOP") {
       stopped=true;

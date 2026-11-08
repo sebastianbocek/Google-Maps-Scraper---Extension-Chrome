@@ -1,6 +1,7 @@
 /* global chrome */
 'use strict';
 importScripts('data_utils.js');
+const CAMPAIGN_KEY='glcsv_campaign';
 
 async function appendBackgroundLog(level,event,details={}) {
   const {glcsv_state:state={}}=await chrome.storage.local.get('glcsv_state');
@@ -72,6 +73,111 @@ async function openMapsSearchAndStart(message) {
   });
   if(!result?.ok)throw new Error(result?.error||'Google Maps no pudo iniciar la extracción.');
   return {ok:true,tabId:tab.id};
+}
+
+async function launchCampaignQuery(campaign) {
+  const current=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!current||current.id!==campaign.id||current.status==='paused')return {ok:true,paused:true};
+  const item=current.queries[current.index];
+  if(!item)throw new Error('No quedan ubicaciones en la campaña.');
+  const url=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.query)}`;
+  let tab=null;
+  if(Number.isInteger(current.tabId)) {
+    try {tab=await chrome.tabs.get(current.tabId);} catch {}
+  }
+  if(tab) {
+    const sameSearch=searchSourceKey(tab.url||'')===searchSourceKey(url);
+    await chrome.tabs.update(tab.id,{...(sameSearch?{}:{url}),active:false});
+  } else {
+    tab=await chrome.tabs.create({url,active:current.index===0});
+  }
+  if(tab.id==null)throw new Error('Chrome no pudo abrir Google Maps para la campaña.');
+  const beforeWait=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!beforeWait||beforeWait.id!==current.id||beforeWait.status==='paused')return {ok:true,paused:true,tabId:tab.id};
+  await chrome.storage.local.set({[CAMPAIGN_KEY]:{...beforeWait,tabId:tab.id,status:'starting',message:`Abriendo ${item.label} (${current.index+1} de ${current.queries.length})…`,updatedAt:Date.now()}});
+  await waitForTabComplete(tab.id);
+  const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!latest||latest.id!==current.id||latest.status==='paused')return {ok:true,paused:true,tabId:tab.id};
+  await chrome.scripting.executeScript({target:{tabId:tab.id},files:['data_utils.js','content.js']});
+  const beforeStart=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!beforeStart||beforeStart.id!==current.id||beforeStart.status==='paused')return {ok:true,paused:true,tabId:tab.id};
+  const result=await chrome.tabs.sendMessage(tab.id,{
+    type:'GLCSV_START',limit:beforeStart.limit,country:beforeStart.phoneCountry||'auto',
+    searchUrl:(await chrome.tabs.get(tab.id)).url||url,tabId:tab.id,campaignId:beforeStart.id,campaignQuery:item.query
+  });
+  if(!result?.ok)throw new Error(result?.error||`No se pudo iniciar la búsqueda de ${item.label}.`);
+  const finalCampaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(finalCampaign?.id===beforeStart.id&&finalCampaign.status!=='paused')await chrome.storage.local.set({[CAMPAIGN_KEY]:{...finalCampaign,status:'running',message:`Buscando ${item.label} (${beforeStart.index+1} de ${beforeStart.queries.length})…`,updatedAt:Date.now()}});
+  else if(finalCampaign?.id===beforeStart.id&&finalCampaign.status==='paused')await chrome.tabs.sendMessage(tab.id,{type:'GLCSV_STOP'}).catch(()=>{});
+  return {ok:true,tabId:tab.id,index:beforeStart.index};
+}
+
+async function startCampaign(message) {
+  const business=String(message.business||'').trim();
+  const queries=(Array.isArray(message.queries)?message.queries:[])
+    .map(item=>({label:String(item?.label||'').trim(),query:String(item?.query||'').trim()}))
+    .filter(item=>item.label&&item.query).slice(0,500);
+  if(!business)throw new Error('Escribí un rubro o negocio para la campaña.');
+  if(!queries.length)throw new Error('Elegí al menos una provincia o una búsqueda nacional.');
+  const id=`campaign-${Date.now()}-${Math.random().toString(36).slice(2,9)}`;
+  const campaign={id,business,country:message.country||'AR',queries,index:0,status:'starting',message:`Preparando ${queries[0].label} (1 de ${queries.length})…`,limit:Number(message.limit)||0,phoneCountry:message.phoneCountry||'auto',tabId:null,createdAt:Date.now(),updatedAt:Date.now()};
+  await chrome.storage.local.set({[CAMPAIGN_KEY]:campaign});
+  try {return await launchCampaignQuery(campaign);}
+  catch(error) {
+    const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY]||campaign;
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...latest,status:'paused',message:`Error al iniciar la campaña: ${error.message||error}`,updatedAt:Date.now()}});
+    throw error;
+  }
+}
+
+async function finishCampaignQuery(message) {
+  const campaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!campaign||campaign.id!==message.campaignId||campaign.status==='paused'||campaign.status==='complete')return {ok:true,ignored:true};
+  if(message.campaignQuery&&campaign.queries[campaign.index]?.query!==message.campaignQuery)return {ok:true,ignored:true,stale:true};
+  if(message.reason==='manual'||message.reason==='error') {
+    const status='paused';
+    const label=campaign.queries[campaign.index]?.label||'la ubicación actual';
+    const text=message.reason==='manual'?`Campaña pausada en ${label}. Podés continuar desde ahí.`:`La búsqueda de ${label} tuvo un error. La campaña quedó pausada y se puede continuar.`;
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status,message:text,updatedAt:Date.now()}});
+    return {ok:true,paused:true};
+  }
+  const nextIndex=campaign.index+1;
+  if(nextIndex>=campaign.queries.length) {
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'complete',index:campaign.index,message:`Campaña completa: ${campaign.queries.length} ubicaciones procesadas.`,updatedAt:Date.now()}});
+    return {ok:true,complete:true};
+  }
+  const next={...campaign,index:nextIndex,status:'starting',message:`Ubicación terminada. Siguiente: ${campaign.queries[nextIndex].label} (${nextIndex+1} de ${campaign.queries.length})…`,updatedAt:Date.now()};
+  await chrome.storage.local.set({[CAMPAIGN_KEY]:next});
+  try {return await launchCampaignQuery(next);}
+  catch(error) {
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...next,status:'paused',message:`Error al abrir ${next.queries[nextIndex].label}: ${error.message||error}. Podés continuar.`,updatedAt:Date.now()}});
+    return {ok:false,error:String(error.message||error)};
+  }
+}
+
+async function pauseCampaign() {
+  const campaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!campaign||!['starting','running'].includes(campaign.status))throw new Error('No hay una campaña activa para pausar.');
+  await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:'Pausando campaña…',updatedAt:Date.now()}});
+  if(Number.isInteger(campaign.tabId)) {
+    try {await chrome.tabs.sendMessage(campaign.tabId,{type:'GLCSV_STOP'});} catch {}
+  }
+  const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(latest?.id===campaign.id&&latest.status==='paused')await chrome.storage.local.set({[CAMPAIGN_KEY]:{...latest,message:`Campaña pausada en ${campaign.queries[campaign.index]?.label||'la ubicación actual'}. Podés continuar desde ahí.`,updatedAt:Date.now()}});
+  return {ok:true};
+}
+
+async function continueCampaign() {
+  const campaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+  if(!campaign||campaign.status!=='paused')throw new Error('No hay una campaña pausada para continuar.');
+  const next={...campaign,status:'starting',message:`Continuando ${campaign.queries[campaign.index]?.label||'la búsqueda actual'}…`,updatedAt:Date.now()};
+  await chrome.storage.local.set({[CAMPAIGN_KEY]:next});
+  try {return await launchCampaignQuery(next);}
+  catch(error) {
+    const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY]||next;
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...latest,status:'paused',message:`Error al continuar: ${error.message||error}`,updatedAt:Date.now()}});
+    throw error;
+  }
 }
 
 async function continueSavedSearch() {
@@ -152,6 +258,26 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       await appendBackgroundLog('error','No se pudo detener la extracción',{error:messageText}).catch(()=>{});
       respond({ok:false,error:messageText});
     });
+    return true;
+  }
+  if (message?.type === 'GLCSV_CAMPAIGN_START') {
+    startCampaign(message).then(respond).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('error','No se pudo iniciar la búsqueda por ciudades',{error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
+    return true;
+  }
+  if (message?.type === 'GLCSV_CAMPAIGN_PAUSE') {
+    pauseCampaign().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if (message?.type === 'GLCSV_CAMPAIGN_CONTINUE') {
+    continueCampaign().then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if (message?.type === 'GLCSV_CAMPAIGN_QUERY_FINISHED') {
+    finishCampaignQuery(message).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
     return true;
   }
   if (message?.type !== 'GLCSV_OPEN_WHATSAPP') return false;

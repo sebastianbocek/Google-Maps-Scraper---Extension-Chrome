@@ -24,6 +24,23 @@
       <p>Google Maps se abrirá en una pestaña nueva. El progreso se guarda para poder continuar después.</p>
       <button id="resume" class="resume-btn" hidden>↻ Continuar extracción guardada</button>
     </section>
+    <section class="campaign-box" aria-labelledby="campaignTitle">
+      <h2 id="campaignTitle">Búsqueda por varias ciudades</h2>
+      <p class="campaign-intro">La búsqueda normal sigue arriba. Este modo procesa cada ciudad en orden y acumula los resultados.</p>
+      <label class="field-label" for="campaignQuery">Rubro o negocio</label>
+      <input id="campaignQuery" type="search" maxlength="160" placeholder="Ej.: marketing digital" autocomplete="off" />
+      <label class="field-label" for="campaignCountry">País</label>
+      <select id="campaignCountry"><option value="AR">Argentina</option></select>
+      <label class="field-label" for="campaignProvinces">Provincias o estados (opcional)</label>
+      <select id="campaignProvinces" multiple size="5" aria-describedby="campaignProvinceHint"></select>
+      <p id="campaignProvinceHint" class="hint">Seleccioná una o más provincias. En computadora, usá Ctrl o Cmd para elegir varias. Si no elegís ninguna, se buscará en toda Argentina. El máximo de fichas se aplica a cada ciudad.</p>
+      <button id="campaignStart" class="primary">▶ Iniciar búsqueda por ciudades</button>
+      <div class="two campaign-controls">
+        <button id="campaignPause" hidden>Ⅱ Pausar campaña</button>
+        <button id="campaignResume" hidden>↻ Continuar campaña</button>
+      </div>
+      <div id="campaignStatus" class="campaign-status" role="status" aria-live="polite">Sin campaña activa.</div>
+    </section>
     <div class="stats">
       <div><b id="total">0</b><span>Detectados</span></div>
       <div><b id="phoneCount">0</b><span>Teléfonos</span></div>
@@ -96,6 +113,7 @@
     <p class="foot">CSV: Nombre · Teléfono · Rating · Categoría · Website · WhatsApp Link · URL negocio. Sin servidores externos.</p>
   </main>
   <script src="data_utils.js"></script>
+  <script src="locations_ar.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

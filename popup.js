@@ -3,16 +3,20 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
-  const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings";
+  const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
-  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:""};
+  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
+  let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
   let loading=true;
   const UNKNOWN="__unknown__";
+  for(const province of Object.keys(globalThis.GLCSVLocations||{})) {
+    const option=document.createElement("option");option.value=province;option.textContent=province;els.campaignProvinces.appendChild(option);
+  }
   function sourceKey(url) {
     try { const u=new URL(url); return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q")||u.searchParams.get("query")||""}&udm=${u.searchParams.get("udm")||""}`; }
     catch { return (url||"").split("#")[0]; }
@@ -70,7 +74,8 @@
     return "\uFEFF"+[header,...items.map(rowCsv)].map(r=>r.map(csvCell).join(",")).join("\r\n")+"\r\n";
   }
   async function downloadCsv(items) {
-    const q=util.fromSearch(state.searchUrl)||"google_maps";
+    const campaignQuery=state.campaignId&&campaignState.id===state.campaignId?campaignState.business:"";
+    const q=campaignQuery||util.fromSearch(state.searchUrl)||"google_maps";
     const suffix=new Date().toISOString().slice(0,10);
     const blob=new Blob([buildCsv(items)],{type:"text/csv;charset=utf-8"});
     const url=URL.createObjectURL(blob);
@@ -143,6 +148,24 @@
     els.country.value=settings.country||"auto";
     if(document.activeElement!==els.whatsappMessage) els.whatsappMessage.value=settings.whatsappMessage||"";
     if(document.activeElement!==els.searchQuery) els.searchQuery.value=settings.searchQuery||"";
+    if(document.activeElement!==els.campaignQuery) els.campaignQuery.value=settings.campaignQuery||"";
+    if(document.activeElement!==els.campaignCountry) els.campaignCountry.value=settings.campaignCountry||"AR";
+    if(document.activeElement!==els.campaignProvinces) {
+      const selected=new Set(settings.campaignProvinces||[]);
+      for(const option of els.campaignProvinces.options)option.selected=selected.has(option.value);
+    }
+    const campaignRunning=campaignState.status==="running"||campaignState.status==="starting";
+    const campaignPaused=campaignState.status==="paused";
+    const campaignBlockingNormal=campaignRunning||campaignPaused;
+    els.campaignStatus.textContent=campaignState.message||"Sin campaña activa.";
+    if(campaignState.queries?.length)els.campaignStatus.textContent+=` · ${Math.min((campaignState.index||0)+1,campaignState.queries.length)} / ${campaignState.queries.length}`;
+    els.campaignStart.disabled=campaignRunning||state.status==="running"||!els.campaignQuery.value.trim();
+    els.campaignQuery.disabled=campaignRunning;
+    els.campaignCountry.disabled=campaignRunning;
+    els.campaignProvinces.disabled=campaignRunning;
+    els.campaignPause.hidden=!campaignRunning;
+    els.campaignResume.hidden=!campaignPaused;
+    els.campaignResume.disabled=campaignPaused&&state.status==="running";
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
     const unknown=data.filter(r=>!rowLocation(r)).length;
     els.locationHint.textContent=!data.length?"Para filtrar por ciudad se utiliza la dirección pública de cada ficha.":
@@ -151,20 +174,20 @@
        suggest&&!filters.strictLocation?`Objetivo sugerido: ${suggest}. El filtro está desactivado.`:
        "Escribí una ciudad para activar el filtro geográfico; también podés usar las papeleras.");
     message(state.message||"Listo para comenzar.");
-    els.start.disabled=!pageSupported || state.status==="running";
+    els.start.disabled=!pageSupported || state.status==="running"||campaignBlockingNormal;
     els.stop.disabled=state.status!=="running";
     els.download.disabled=kept.length===0;
-    els.limit.disabled=state.status==="running";
-    els.country.disabled=state.status==="running";
-    els.searchQuery.disabled=state.status==="running";
-    els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
-    els.resume.hidden=!state.searchUrl;
+    els.limit.disabled=state.status==="running"||campaignBlockingNormal;
+    els.country.disabled=state.status==="running"||campaignBlockingNormal;
+    els.searchQuery.disabled=state.status==="running"||campaignBlockingNormal;
+    els.searchStart.disabled=state.status==="running" || campaignBlockingNormal || !els.searchQuery.value.trim();
+    els.resume.hidden=!state.searchUrl||Boolean(campaignState.id&&campaignState.id===state.campaignId);
     els.resume.textContent=state.status==="running"?"● Comprobar extracción en segundo plano":"↻ Continuar extracción guardada";
     els.start.textContent=state.status==="running"?"● Extracción en curso":
       data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
   }
   async function readData() {
-    const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY]);
+    const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
     state=stored[STATE_KEY]||initial();
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
@@ -174,7 +197,8 @@
       filters={...filters,strictLocation:false,locationFilterTouched:false};
       await chrome.storage.local.set({[FILTER_KEY]:filters});
     }
-    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",...(stored[SETTINGS_KEY]||{})};
+    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(stored[SETTINGS_KEY]||{})};
+    campaignState=stored[CAMPAIGN_KEY]||campaignState;
     loading=false;
     render();
   }
@@ -201,6 +225,12 @@
   }
   async function saveFilters() {await chrome.storage.local.set({[FILTER_KEY]:filters});}
   async function saveSettings() {await chrome.storage.local.set({[SETTINGS_KEY]:settings});}
+  async function saveCampaignForm() {
+    settings.campaignQuery=els.campaignQuery.value.trim();
+    settings.campaignCountry=els.campaignCountry.value;
+    settings.campaignProvinces=[...els.campaignProvinces.selectedOptions].map(option=>option.value);
+    await saveSettings();
+  }
   for(const list of [els.categories,els.locations]) {
     list.addEventListener("click",async event=>{
       const button=event.target.closest("button[data-kind][data-key]");if(!button)return;
@@ -249,7 +279,7 @@
   async function startSearchFromPopup() {
     const query=els.searchQuery.value.trim();
     if(!query) {message("Escribí qué negocio o categoría querés buscar.");return;}
-    if(state.status==="running") {message("Esperá a que termine o detené la extracción actual.");return;}
+    if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting"||campaignState.status==="paused") {message("Continuá o reemplazá la campaña pausada antes de iniciar otra búsqueda.");return;}
     const mapsUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
     const sameSearch=rows().length>0 && util.norm(util.fromSearch(state.searchUrl))===util.norm(query);
     const key=sameSearch?state.searchKey:sourceKey(mapsUrl);
@@ -274,9 +304,56 @@
     }
   }
   els.searchStart.addEventListener("click",startSearchFromPopup);
+  for(const field of [els.campaignQuery,els.campaignCountry,els.campaignProvinces]) {
+    field.addEventListener("input",()=>{
+      settings.campaignQuery=els.campaignQuery.value;
+      els.campaignStart.disabled=campaignState.status==="running"||campaignState.status==="starting"||state.status==="running"||!settings.campaignQuery.trim();
+    });
+    field.addEventListener("change",()=>saveCampaignForm().catch(err=>message("Error al guardar la campaña: "+(err.message||String(err)))));
+  }
+  els.campaignStart.addEventListener("click",async ()=>{
+    const query=els.campaignQuery.value.trim();
+    if(!query)return;
+    if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción activa antes de iniciar una campaña.");return;}
+    const provinces=[...els.campaignProvinces.selectedOptions].map(option=>option.value);
+    const locations=globalThis.GLCSVLocations||{};
+    const queries=provinces.length
+      ? provinces.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, Argentina` })))
+      : [{label:"Argentina",query:`${query} en Argentina`}];
+    if(rows().length&&!confirm("La campaña nueva va a reemplazar los resultados guardados al iniciar su primera búsqueda. ¿Continuar?"))return;
+    let limit=Number.parseInt(els.limit.value,10);
+    if(!Number.isFinite(limit)||limit<0)limit=0;
+    settings.limit=Math.min(100000,limit);
+    await saveCampaignForm();
+    await saveSettings();
+    els.campaignStart.disabled=true;
+    try {
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_START",business:query,country:els.campaignCountry.value,queries,limit:settings.limit,phoneCountry:settings.country||"auto"});
+      if(!result?.ok)throw new Error(result?.error||"No se pudo iniciar la campaña.");
+      await readData();
+    } catch(err) {message("Error al iniciar la campaña: "+(err.message||String(err)));}
+  });
+  els.campaignPause.addEventListener("click",async ()=>{
+    els.campaignPause.disabled=true;
+    try {
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_PAUSE"});
+      if(!result?.ok)throw new Error(result?.error||"No se pudo pausar la campaña.");
+      await readData();
+    } catch(err) {message("Error al pausar la campaña: "+(err.message||String(err)));}
+    finally {els.campaignPause.disabled=false;}
+  });
+  els.campaignResume.addEventListener("click",async ()=>{
+    els.campaignResume.disabled=true;
+    try {
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_CONTINUE"});
+      if(!result?.ok)throw new Error(result?.error||"No se pudo continuar la campaña.");
+      await readData();
+    } catch(err) {message("Error al continuar la campaña: "+(err.message||String(err)));}
+    finally {els.campaignResume.disabled=false;}
+  });
   els.searchQuery.addEventListener("input",()=>{
     settings.searchQuery=els.searchQuery.value;
-    els.searchStart.disabled=state.status==="running" || !els.searchQuery.value.trim();
+    els.searchStart.disabled=state.status==="running" || ["running","starting","paused"].includes(campaignState.status) || !els.searchQuery.value.trim();
   });
   els.searchQuery.addEventListener("keydown",event=>{
     if(event.key==="Enter") {event.preventDefault();startSearchFromPopup();}
@@ -335,10 +412,11 @@
     } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
   });
   els.clear.addEventListener("click",async ()=>{
-    if(state.status==="running") {message("Detené la extracción antes de borrar.");return;}
+    if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción o campaña antes de borrar.");return;}
     if(rows().length&&!confirm("¿Borrar definitivamente las fichas guardadas? Las exclusiones de categorías y ciudades se pueden deshacer; este borrado completo no."))return;
     state=initial();filters=blankFilters("");
-    await chrome.storage.local.set({[STATE_KEY]:state,[FILTER_KEY]:filters});
+    if(campaignState.status==="paused")campaignState={...campaignState,status:"cancelled",message:"Campaña cancelada al borrar los resultados guardados."};
+    await chrome.storage.local.set({[STATE_KEY]:state,[FILTER_KEY]:filters,[CAMPAIGN_KEY]:campaignState});
     render();
   });
   chrome.storage.onChanged.addListener((changes,area)=>{
@@ -348,7 +426,8 @@
       if(filters.searchKey!==state.searchKey)filters=blankFilters(state.searchKey);
     }
     if(changes[FILTER_KEY])filters=changes[FILTER_KEY].newValue||blankFilters(state.searchKey);
-    if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",...(changes[SETTINGS_KEY].newValue||{})};
+    if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(changes[SETTINGS_KEY].newValue||{})};
+    if(changes[CAMPAIGN_KEY])campaignState=changes[CAMPAIGN_KEY].newValue||{status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
     render();
   });
   Promise.all([currentTab(),readData()]).catch(err=>message("Error de Chrome: "+(err.message||String(err))));

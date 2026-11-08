@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.4.3
+GOOGLE LOCAL → CSV  |  v1.5.0
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -17,6 +17,11 @@ EXTRAER Y EXPORTAR
 - Desde el panel, escribí una búsqueda (por ejemplo, 'cafeterías en Palermo') y pulsá
   'Buscar y comenzar extracción'. Google Maps se abrirá en una pestaña nueva y la
   extracción comenzará automáticamente.
+- Debajo está 'Búsqueda por varias ciudades': escribí el rubro y elegí una o más
+  provincias argentinas. La campaña recorre las ciudades seleccionadas de a una y
+  acumula los resultados. Sin provincias, busca el rubro en toda Argentina.
+- La campaña avanza a la siguiente ciudad al terminar los resultados de la actual.
+  Podés pausarla y continuarla desde el progreso guardado.
 - Podés cambiar de pestaña mientras corre. El progreso se guarda; si se interrumpe,
   pulsá 'Continuar extracción guardada' para retomarlo, incluso en segundo plano.
 - El panel incluye un registro de actividad. Si algo falla, abrilo y pulsá 'Copiar log'

@@ -22,6 +22,7 @@
 
 - Extrae fichas de negocios visibles en Google Maps y Google Local.
 - Permite escribir una búsqueda en el panel; abre Google Maps en una pestaña nueva e inicia la extracción.
+- Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
@@ -44,9 +45,11 @@
 5. Selecciona la carpeta **Google Maps Scraper - Extension Chrome** que contiene `manifest.json`.
 6. Abre la extensión, escribe una búsqueda, por ejemplo “cafeterías en Palermo”, y haz clic en **Buscar y comenzar extracción**. Se abrirá Google Maps en una pestaña nueva y la extracción comenzará automáticamente.
 7. Puedes cambiar de pestaña mientras se extraen los resultados. Si la extracción se detiene, pulsa **Continuar extracción guardada** para retomar el progreso; si hace falta, la extensión volverá a abrir Maps en segundo plano.
-8. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
-9. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
-10. Haz clic en **Descargar CSV**.
+8. Para buscar en varias ciudades, usa **Búsqueda por varias ciudades** debajo del buscador normal. Escribe el rubro, elige Argentina y selecciona una o más provincias. La campaña buscará en cada ciudad de esas provincias, en orden, y acumulará los resultados. Si no seleccionas provincias, hará una búsqueda general del rubro en Argentina.
+9. La campaña avanza automáticamente cuando Maps deja de cargar resultados en una ciudad. Puedes pausarla y continuarla desde la ubicación en curso.
+10. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
+11. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
+12. Haz clic en **Descargar CSV**.
 
 El contador de fichas exportables se actualiza al cambiar los filtros. La ubicación objetivo aparece como sugerencia, pero no filtra la exportación hasta que actives **Exportar solo la ubicación objetivo**. Así, la descarga normal combina únicamente los filtros que elegiste.
 
@@ -69,6 +72,7 @@ Si ya tienes una versión instalada, conserva la misma carpeta de instalación: 
 - `content.js`: lectura y extracción de fichas desde Google.
 - `data_utils.js`, `quick_whatsapp.js`: utilidades de datos y acceso rápido a WhatsApp.
 - `background.js`: servicio en segundo plano y descarga.
+- `locations_ar.js`: catálogo de provincias y ciudades para las campañas de Argentina.
 - `assets/demo.gif`, `assets/demo.mp4`: muestra animada y video original.
 
 ## Privacidad y límites

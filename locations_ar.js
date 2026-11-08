@@ -1,0 +1,27 @@
+/* global window */
+window.GLCSVLocations = Object.freeze({
+  "Buenos Aires": ["La Plata","Mar del Plata","Bahía Blanca","Quilmes","Lomas de Zamora","Avellaneda","Tigre","San Isidro","Lanús","Morón","San Martín","Vicente López","Tres de Febrero","Florencio Varela","Berazategui","Almirante Brown","José C. Paz","Malvinas Argentinas","Merlo","Ituzaingó","Hurlingham","Moreno","Esteban Echeverría","Ezeiza","La Matanza","San Fernando","Pilar","San Miguel","General San Martín","Campana","Zárate","Pergamino","Junín","Tandil","Olavarría","Necochea","Luján","Chivilcoy","9 de Julio","Azul","Balcarce","San Nicolás","Tres Arroyos","Villa Gesell","Pinamar","Miramar","General Madariaga","Bahía San Blas","Coronel Suárez","Coronel Pringles","Bragado","Mercedes","Pehuajó","Saladillo","Chacabuco","Lincoln","Rojas","Lobos","Cañuelas","San Vicente","Brandsen","Monte","Navarro","Las Flores","Carlos Casares","Tornquist","Pigüé","Carhué","General Belgrano","San Pedro","Baradero","Ramallo","General Villegas","Trenque Lauquen","25 de Mayo","Rauch","Tapalqué"],
+  "Ciudad Autónoma de Buenos Aires": ["Agronomía","Almagro","Balvanera","Belgrano","Boedo","Caballito","Chacarita","Coghlan","Colegiales","Constitución","Flores","Floresta","La Boca","Liniers","Mataderos","Monserrat","Monte Castro","Nueva Pompeya","Núñez","Palermo","Parque Avellaneda","Parque Chacabuco","Parque Chas","Parque Patricios","Puerto Madero","Recoleta","Retiro","Saavedra","San Cristóbal","San Nicolás","San Telmo","Versalles","Villa Crespo","Villa Devoto","Villa General Mitre","Villa Lugano","Villa Luro","Villa Ortúzar","Villa Pueyrredón","Villa Real","Villa Riachuelo","Villa Santa Rita","Villa Soldati","Villa Urquiza","Villa del Parque"],
+  "Catamarca": ["San Fernando del Valle de Catamarca","Belén","Santa María","Tinogasta","Andalgalá"],
+  "Chaco": ["Resistencia","Presidencia Roque Sáenz Peña","Villa Ángela","Barranqueras","Charata"],
+  "Chubut": ["Rawson","Trelew","Puerto Madryn","Esquel","Comodoro Rivadavia"],
+  "Córdoba": ["Córdoba","Villa Carlos Paz","Río Cuarto","Villa María","Alta Gracia","San Francisco","Jesús María","La Calera","Río Tercero","Villa Allende","Cosquín","Río Ceballos","Villa Dolores","Villa General Belgrano","Marcos Juárez","Villa de Soto","Morteros","Bell Ville","Laboulaye","Leones","Deán Funes","Oncativo","Arroyito","Capilla del Monte","Salsipuedes","Colonia Caroya","La Falda","Embalse","Las Varillas","Monte Cristo","San Marcos Sierras","Cruz del Eje","Tanti","Almafuerte","Pilar","Malagueño","La Carlota","Santa Rosa de Calamuchita","Villa Cura Brochero","Bialet Massé","Mendiolaza","Las Perdices","Hernando","Jovita","Vicuña Mackenna","Alejandro Roca","Laguna Larga","San Basilio","Serrezuela"],
+  "Corrientes": ["Corrientes","Goya","Paso de los Libres","Mercedes","Santo Tomé"],
+  "Entre Ríos": ["Paraná","Concordia","Gualeguaychú","Concepción del Uruguay","Victoria"],
+  "Formosa": ["Formosa","Clorinda","Pirané","Las Lomitas"],
+  "Jujuy": ["San Salvador de Jujuy","Palpalá","Libertador General San Martín","La Quiaca"],
+  "La Pampa": ["Santa Rosa","General Pico","Eduardo Castex","Toay"],
+  "La Rioja": ["La Rioja","Chilecito","Aimogasta","Chamical"],
+  "Mendoza": ["Mendoza","Godoy Cruz","San Rafael","Luján de Cuyo","Maipú","Las Heras","Guaymallén","Tunuyán","General Alvear","San Martín","Rivadavia","Lavalle","Malargüe","San Carlos","Santa Rosa","Junín","La Paz","Tupungato","Luján","Ciudad"],
+  "Misiones": ["Posadas","Oberá","Eldorado","Puerto Iguazú","Apóstoles"],
+  "Neuquén": ["Neuquén","Cutral Có","Plottier","Zapala","San Martín de los Andes","Centenario","Plaza Huincul","Senillosa","Chos Malal","Andacollo","Las Lajas","Aluminé","Villa La Angostura","Añelo","San Patricio del Chañar"],
+  "Río Negro": ["Viedma","Bariloche","General Roca","Cipolletti","Allen"],
+  "Salta": ["Salta","San Ramón de la Nueva Orán","Tartagal","Metán","Rosario de la Frontera"],
+  "San Juan": ["San Juan","Rawson","Chimbas","Pocito","Santa Lucía"],
+  "San Luis": ["San Luis","Villa Mercedes","Merlo","La Punta"],
+  "Santa Cruz": ["Río Gallegos","Caleta Olivia","El Calafate","Puerto Deseado","Las Heras","Perito Moreno","Gobernador Gregores","Puerto San Julián","Pico Truncado","Cañadón Seco","Los Antiguos","Río Turbio"],
+  "Santa Fe": ["Santa Fe","Rosario","Rafaela","Venado Tuerto","Reconquista","Sunchales","Cañada de Gómez","Villa Constitución","Casilda","Esperanza","Firmat","San Lorenzo","San Javier","Funes","Armstrong","Santo Tomé","Granadero Baigorria","Las Rosas","Chabás","Villa Ocampo"],
+  "Santiago del Estero": ["Santiago del Estero","La Banda","Termas de Río Hondo","Añatuya"],
+  "Tierra del Fuego, Antártida e Islas del Atlántico Sur": ["Ushuaia","Río Grande","Tolhuin","Puerto Deseado","Río Turbio","Caleta Olivia","El Calafate"],
+  "Tucumán": ["San Miguel de Tucumán","Yerba Buena","Tafí Viejo","Concepción","Aguilares"]
+});
