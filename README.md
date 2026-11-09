@@ -25,10 +25,11 @@
 - Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
+- Permite marcar y desmarcar categorías de negocio con casillas antes de exportar, con acciones para seleccionar todas o ninguna y actualización inmediata del contador.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
 - Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas.
-- Limpia la exportación antes de descargar: excluye categorías o ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
+- Limpia la exportación antes de descargar: selecciona categorías, excluye ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
 - Permite añadir un mensaje opcional prellenado en cada enlace de WhatsApp del CSV; si el campo queda vacío, crea el enlace habitual sin texto.
 - En el filtro de sitio web, los perfiles de Instagram y Facebook cuentan como “sin sitio web”; sus enlaces se conservan en el CSV.
@@ -50,7 +51,7 @@
 8. Para buscar en varias ciudades, usa **Búsqueda por varias ciudades** debajo del buscador normal. Escribe el rubro, elige Argentina y marca una o más provincias; desmarca una casilla para quitar una provincia. La campaña buscará en cada ciudad de las provincias marcadas, en orden, y acumulará los resultados. Si no marcas provincias, hará una búsqueda general del rubro en Argentina.
 9. La campaña avanza automáticamente cuando Maps deja de cargar resultados en una ciudad. Puedes pausarla y continuarla desde la ubicación en curso.
 10. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
-11. En **Limpiar CSV**, elige si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. Los perfiles de Instagram y Facebook cuentan como negocios sin sitio web. También puedes excluir categorías o ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
+11. En **Limpiar CSV**, marca las categorías que quieres conservar; puedes seleccionarlas todas o ninguna. Elige también si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. Los perfiles de Instagram y Facebook cuentan como negocios sin sitio web. También puedes excluir ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
 12. Haz clic en **Descargar CSV**.
 
 El contador de fichas exportables se actualiza al cambiar los filtros. La ubicación objetivo aparece como sugerencia, pero no filtra la exportación hasta que actives **Exportar solo la ubicación objetivo**. Así, la descarga normal combina únicamente los filtros que elegiste.

@@ -97,8 +97,13 @@
         <option value="with">Solo con teléfono</option>
         <option value="without">Solo sin teléfono</option>
       </select>
-      <div class="filter-title-row"><h3>Categorías detectadas</h3><span id="categoryCount">0</span></div>
-      <div id="categories" class="filter-list" aria-label="Filtros por categoría"><p class="empty">Todavía no hay categorías.</p></div>
+      <div class="filter-title-row"><h3>Categorías para exportar</h3><span id="categoryCount">0 / 0</span></div>
+      <div class="selection-actions" aria-label="Acciones de selección de categorías">
+        <button id="selectAllCategories" class="selection-action" type="button">Seleccionar todas</button>
+        <button id="clearCategorySelection" class="selection-action" type="button">Deseleccionar todas</button>
+      </div>
+      <div id="categories" class="filter-list category-list" role="group" aria-label="Selecciona las categorías que quieres exportar"><p class="empty">Todavía no hay categorías.</p></div>
+      <p class="hint">Las categorías marcadas se incluirán en el CSV. Las nuevas categorías aparecen seleccionadas.</p>
       <div class="filter-title-row"><h3>Ubicaciones detectadas</h3><span id="locationCount">0</span></div>
       <div id="locations" class="filter-list" aria-label="Filtros por ubicación"><p class="empty">Todavía no hay ubicaciones.</p></div>
       <label class="field-label target-label" for="targetLocation">Ubicación objetivo (ciudad)</label>

@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.5.3
+GOOGLE LOCAL → CSV  |  v1.5.4
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -39,8 +39,10 @@ EXTRAER Y EXPORTAR
 - El contador de fichas exportables se actualiza al cambiar cualquier filtro.
 - En 'Limpiar CSV' podés escribir un mensaje opcional para que los enlaces de WhatsApp
   del CSV lo abran prellenado. Si lo dejás vacío, se genera el enlace habitual.
-- Papelera roja: excluir esa categoría o ciudad SOLO DE LA EXPORTACIÓN.
-- Flecha de restauración: volver a incluirla.
+- Marcá o desmarcá las categorías para decidir cuáles se exportan; usá 'Seleccionar todas'
+  o 'Deseleccionar todas' para cambiar la selección de una vez.
+- En ubicaciones, la papelera roja excluye una ciudad SOLO DE LA EXPORTACIÓN y la flecha
+  de restauración vuelve a incluirla.
 - 'Ubicación objetivo': elegí la ciudad exacta; 'Exportar solo la ubicación objetivo'
   elimina del CSV las fichas de otras ciudades o sin ciudad verificable.
 - 'Sitio web' y 'Teléfono': elegí todos los negocios, solo los que tienen el dato,
@@ -50,6 +52,8 @@ EXTRAER Y EXPORTAR
 - La extensión reconoce negocios repetidos por su identificador de Google Maps y, si falta,
   por nombre junto con dirección o teléfono. Las fichas repetidas se omiten del CSV y se
   registran en el log; las filas antiguas también se depuran antes de exportar.
+- En 'Limpiar CSV', marcá las categorías que querés conservar. Podés seleccionar todas
+  o ninguna; el contador de resultados exportables se actualiza al instante.
 
 TELÉFONO → WHATSAPP EN UN CLIC
 - En Google Maps/Locales, mantén ALT y hacé CLIC sobre el teléfono del negocio:

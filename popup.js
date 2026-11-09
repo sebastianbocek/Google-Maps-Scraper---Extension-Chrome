@@ -3,7 +3,7 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear",
+  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear","selectAllCategories","clearCategorySelection",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign";
@@ -135,6 +135,23 @@
     }
     container.scrollTop=prevScroll;
   }
+  function drawCategoryList(items) {
+    const prevScroll=els.categories.scrollTop;
+    els.categories.replaceChildren();
+    if(!items.length) {
+      const p=document.createElement("p");p.className="empty";p.textContent="Todavía no hay categorías detectadas.";
+      els.categories.appendChild(p);return;
+    }
+    const excluded=new Set(filters.excludedCategories||[]);
+    for(const item of items) {
+      const label=document.createElement("label");label.className="category-option";
+      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=item.key;checkbox.checked=!excluded.has(item.key);
+      const name=document.createElement("span");name.className="category-name";name.textContent=item.name;
+      const count=document.createElement("span");count.className="filter-num";count.textContent=String(item.count);
+      label.append(checkbox,name,count);els.categories.appendChild(label);
+    }
+    els.categories.scrollTop=prevScroll;
+  }
   function render() {
     if(loading) return;
     const data=rows(), kept=includedRows();
@@ -143,9 +160,13 @@
     els.phoneCount.textContent=String(data.filter(r=>r.phone).length);
     els.webCount.textContent=String(data.filter(hasRealWebsite).length);
     const cGroups=groups(data,rowCategory), lGroups=groups(data,rowLocation);
-    els.categoryCount.textContent=String(cGroups.length);
+    const selectedCategoryCount=cGroups.filter(item=>!(filters.excludedCategories||[]).includes(item.key)).length;
+    els.categoryCount.textContent=`${selectedCategoryCount} / ${cGroups.length}`;
+    els.categoryCount.title="Categorías seleccionadas para el CSV / categorías detectadas";
+    els.selectAllCategories.disabled=!cGroups.length||selectedCategoryCount===cGroups.length;
+    els.clearCategorySelection.disabled=!cGroups.length||selectedCategoryCount===0;
     els.locationCount.textContent=String(lGroups.length);
-    drawList(els.categories,cGroups,"category",filters.excludedCategories||[]);
+    drawCategoryList(cGroups);
     drawList(els.locations,lGroups,"location",filters.excludedLocations||[]);
     els.exportCount.textContent=`${kept.length} / ${data.length}`;
     els.exportCount.title="Fichas que se exportarán / fichas detectadas";
@@ -250,6 +271,19 @@
       filters[field]=[...set];render();await saveFilters();
     });
   }
+  els.categories.addEventListener("change",async event=>{
+    const checkbox=event.target.closest('input[type="checkbox"]');if(!checkbox)return;
+    const excluded=new Set(filters.excludedCategories||[]);
+    if(checkbox.checked)excluded.delete(checkbox.value);else excluded.add(checkbox.value);
+    filters.excludedCategories=[...excluded];render();await saveFilters();
+  });
+  els.selectAllCategories.addEventListener("click",async ()=>{
+    filters.excludedCategories=[];render();await saveFilters();
+  });
+  els.clearCategorySelection.addEventListener("click",async ()=>{
+    filters.excludedCategories=[...els.categories.querySelectorAll('input[type="checkbox"]')].map(checkbox=>checkbox.value);
+    render();await saveFilters();
+  });
   const updateStrictLocation=async ()=>{
     const value=els.strictLocation.checked;
     if(filters.strictLocation===value&&filters.locationFilterTouched)return;
