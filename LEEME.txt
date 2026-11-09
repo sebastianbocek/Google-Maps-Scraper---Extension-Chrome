@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.5.6
+GOOGLE LOCAL → CSV  |  v1.5.7
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -20,7 +20,7 @@ EXTRAER Y EXPORTAR
 - Debajo está 'Búsqueda por varias ciudades': escribí el rubro y marcá una o más
   provincias argentinas. Desmarcá una casilla para quitarla. La campaña recorre las ciudades de a una y
   acumula los resultados. Sin provincias seleccionadas, recorre las ciudades cargadas de todas las provincias argentinas.
-- La campaña avanza a la siguiente ciudad al terminar los resultados de la actual.
+- La campaña avanza a la siguiente ciudad al terminar los resultados de la actual. Si la pausás, al continuar conserva la pestaña y el progreso de la ciudad en curso.
   Podés pausarla y continuarla desde el progreso guardado.
 - Podés cambiar de pestaña mientras corre. El progreso se guarda; si se interrumpe,
   pulsá 'Continuar extracción guardada' para retomarlo, incluso en segundo plano.

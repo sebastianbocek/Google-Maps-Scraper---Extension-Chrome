@@ -81,13 +81,26 @@ async function launchCampaignQuery(campaign) {
   const item=current.queries[current.index];
   if(!item)throw new Error('No quedan ubicaciones en la campaña.');
   const url=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.query)}`;
+  const {glcsv_state:savedState={}}=await chrome.storage.local.get('glcsv_state');
+  // Al abrir una ficha, Maps cambia /maps/search/ por /maps/place/ aunque la
+  // lista y su posición sigan vivas en la pestaña. Al reanudar la misma query,
+  // conservar esa pestaña permite seguir desde el último resultado procesado.
+  const resumeSameQuery=savedState.campaignId===current.id&&
+    savedState.campaignQuery===item.query&&Array.isArray(savedState.inspectedIds);
   let tab=null;
   if(Number.isInteger(current.tabId)) {
     try {tab=await chrome.tabs.get(current.tabId);} catch {}
   }
   if(tab) {
+    const keepCurrentMapsState=resumeSameQuery&&supportedSearchUrl(tab.url||'');
     const sameSearch=searchSourceKey(tab.url||'')===searchSourceKey(url);
-    await chrome.tabs.update(tab.id,{...(sameSearch?{}:{url}),active:false});
+    await chrome.tabs.update(tab.id,{...((sameSearch||keepCurrentMapsState)?{}:{url}),active:false});
+    if(keepCurrentMapsState) {
+      await appendBackgroundLog('info','Reanudando campaña en la pestaña y posición guardadas',{
+        campaignId:current.id,query:item.query,tabId:tab.id,
+        inspected:savedState.inspectedIds.length,rows:savedState.rows?.length||0
+      });
+    }
   } else {
     tab=await chrome.tabs.create({url,active:current.index===0});
   }
