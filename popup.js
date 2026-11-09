@@ -366,9 +366,9 @@
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción activa antes de iniciar una campaña.");return;}
     const provinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
     const locations=globalThis.GLCSVLocations||{};
-    const queries=provinces.length
-      ? provinces.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, Argentina` })))
-      : [{label:"Argentina",query:`${query} en Argentina`}];
+    const provincesToSearch=provinces.length?provinces:Object.keys(locations);
+    const queries=provincesToSearch.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, Argentina` })));
+    if(!queries.length){message("No hay ciudades cargadas para las provincias seleccionadas.");return;}
     if(rows().length&&!confirm("La campaña nueva va a reemplazar los resultados guardados al iniciar su primera búsqueda. ¿Continuar?"))return;
     let limit=Number.parseInt(els.limit.value,10);
     if(!Number.isFinite(limit)||limit<0)limit=0;
