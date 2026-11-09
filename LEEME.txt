@@ -1,4 +1,4 @@
-GOOGLE LOCAL → CSV  |  v1.5.4
+GOOGLE LOCAL → CSV  |  v1.5.5
 =================================
 
 EXTENSIÓN PARA GOOGLE CHROME
@@ -52,8 +52,8 @@ EXTRAER Y EXPORTAR
 - La extensión reconoce negocios repetidos por su identificador de Google Maps y, si falta,
   por nombre junto con dirección o teléfono. Las fichas repetidas se omiten del CSV y se
   registran en el log; las filas antiguas también se depuran antes de exportar.
-- En 'Limpiar CSV', marcá las categorías que querés conservar. Podés seleccionar todas
-  o ninguna; el contador de resultados exportables se actualiza al instante.
+- En 'Limpiar CSV', las categorías empiezan desmarcadas. Marcá las que querés conservar.
+  Podés seleccionar todas o ninguna; el contador se actualiza al instante.
 
 TELÉFONO → WHATSAPP EN UN CLIC
 - En Google Maps/Locales, mantén ALT y hacé CLIC sobre el teléfono del negocio:

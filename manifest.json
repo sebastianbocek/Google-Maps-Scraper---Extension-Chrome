@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Google Local → CSV | Negocios",
   "short_name": "Locales a CSV",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Busca negocios desde la extensión, extrae fichas de Google Maps y Locales, filtra resultados y exporta CSV.",
   "action": {
     "default_title": "Extraer negocios a CSV",

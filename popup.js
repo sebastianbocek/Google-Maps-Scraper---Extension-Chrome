@@ -8,7 +8,7 @@
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
-  const blankFilters=key=>({searchKey:key||"",excludedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
+  const blankFilters=key=>({searchKey:key||"",includedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
   let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
@@ -62,10 +62,10 @@
     return actual===targetText || targetText.startsWith(actual+",") || targetText.startsWith(actual+" ");
   }
   function includedRows() {
-    const badCats=new Set(filters.excludedCategories||[]),badCities=new Set(filters.excludedLocations||[]);
+    const selectedCats=new Set(filters.includedCategories||[]),badCities=new Set(filters.excludedLocations||[]);
     const targetCity=filters.strictLocation?target():"";
     const websiteMode=filters.websiteMode||"all",phoneMode=filters.phoneMode||"all";
-    return util.dedupeRows(rows()).filter(row=>!badCats.has(groupKey(rowCategory(row))) &&
+    return util.dedupeRows(rows()).filter(row=>selectedCats.has(groupKey(rowCategory(row))) &&
       !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity) &&
       (websiteMode==="all" || (websiteMode==="with" ? hasRealWebsite(row) : !hasRealWebsite(row))) &&
       (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
@@ -142,10 +142,10 @@
       const p=document.createElement("p");p.className="empty";p.textContent="Todavía no hay categorías detectadas.";
       els.categories.appendChild(p);return;
     }
-    const excluded=new Set(filters.excludedCategories||[]);
+    const selected=new Set(filters.includedCategories||[]);
     for(const item of items) {
       const label=document.createElement("label");label.className="category-option";
-      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=item.key;checkbox.checked=!excluded.has(item.key);
+      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=item.key;checkbox.checked=selected.has(item.key);
       const name=document.createElement("span");name.className="category-name";name.textContent=item.name;
       const count=document.createElement("span");count.className="filter-num";count.textContent=String(item.count);
       label.append(checkbox,name,count);els.categories.appendChild(label);
@@ -160,7 +160,7 @@
     els.phoneCount.textContent=String(data.filter(r=>r.phone).length);
     els.webCount.textContent=String(data.filter(hasRealWebsite).length);
     const cGroups=groups(data,rowCategory), lGroups=groups(data,rowLocation);
-    const selectedCategoryCount=cGroups.filter(item=>!(filters.excludedCategories||[]).includes(item.key)).length;
+    const selectedCategoryCount=cGroups.filter(item=>(filters.includedCategories||[]).includes(item.key)).length;
     els.categoryCount.textContent=`${selectedCategoryCount} / ${cGroups.length}`;
     els.categoryCount.title="Categorías seleccionadas para el CSV / categorías detectadas";
     els.selectAllCategories.disabled=!cGroups.length||selectedCategoryCount===cGroups.length;
@@ -222,6 +222,14 @@
     state=normalizeState(stored[STATE_KEY]);
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
+    else if(!Array.isArray(filters.includedCategories)) {
+      const legacyExcluded=new Set(filters.excludedCategories||[]);
+      const legacyHadSelection=legacyExcluded.size>0;
+      const allCategoryKeys=groups(rows(),rowCategory).map(item=>item.key);
+      filters={...filters,includedCategories:legacyHadSelection?allCategoryKeys.filter(key=>!legacyExcluded.has(key)):[]};
+      delete filters.excludedCategories;
+      await chrome.storage.local.set({[FILTER_KEY]:filters});
+    }
     if(typeof filters.locationFilterTouched!=="boolean") {
       // Las versiones anteriores filtraban automáticamente por la ciudad sugerida.
       // Convertir ese valor predeterminado en opcional evita excluir resultados sin aviso.
@@ -262,26 +270,23 @@
     settings.campaignProvinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
     await saveSettings();
   }
-  for(const list of [els.categories,els.locations]) {
-    list.addEventListener("click",async event=>{
-      const button=event.target.closest("button[data-kind][data-key]");if(!button)return;
-      const field=button.dataset.kind==="category"?"excludedCategories":"excludedLocations";
-      const set=new Set(filters[field]||[]);const key=button.dataset.key;
-      if(set.has(key))set.delete(key);else set.add(key);
-      filters[field]=[...set];render();await saveFilters();
-    });
-  }
+  els.locations.addEventListener("click",async event=>{
+    const button=event.target.closest("button[data-kind][data-key]");if(!button)return;
+    const set=new Set(filters.excludedLocations||[]),key=button.dataset.key;
+    if(set.has(key))set.delete(key);else set.add(key);
+    filters.excludedLocations=[...set];render();await saveFilters();
+  });
   els.categories.addEventListener("change",async event=>{
     const checkbox=event.target.closest('input[type="checkbox"]');if(!checkbox)return;
-    const excluded=new Set(filters.excludedCategories||[]);
-    if(checkbox.checked)excluded.delete(checkbox.value);else excluded.add(checkbox.value);
-    filters.excludedCategories=[...excluded];render();await saveFilters();
+    const selected=new Set(filters.includedCategories||[]);
+    if(checkbox.checked)selected.add(checkbox.value);else selected.delete(checkbox.value);
+    filters.includedCategories=[...selected];render();await saveFilters();
   });
   els.selectAllCategories.addEventListener("click",async ()=>{
-    filters.excludedCategories=[];render();await saveFilters();
+    filters.includedCategories=groups(rows(),rowCategory).map(item=>item.key);render();await saveFilters();
   });
   els.clearCategorySelection.addEventListener("click",async ()=>{
-    filters.excludedCategories=[...els.categories.querySelectorAll('input[type="checkbox"]')].map(checkbox=>checkbox.value);
+    filters.includedCategories=[];
     render();await saveFilters();
   });
   const updateStrictLocation=async ()=>{
@@ -457,7 +462,7 @@
   });
   els.clear.addEventListener("click",async ()=>{
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción o campaña antes de borrar.");return;}
-    if(rows().length&&!confirm("¿Borrar definitivamente las fichas guardadas? Las exclusiones de categorías y ciudades se pueden deshacer; este borrado completo no."))return;
+    if(rows().length&&!confirm("¿Borrar definitivamente las fichas guardadas? La selección de categorías y las exclusiones de ciudades se pueden volver a cambiar; este borrado completo no."))return;
     state=initial();filters=blankFilters("");
     if(campaignState.status==="paused")campaignState={...campaignState,status:"cancelled",message:"Campaña cancelada al borrar los resultados guardados."};
     await chrome.storage.local.set({[STATE_KEY]:state,[FILTER_KEY]:filters,[CAMPAIGN_KEY]:campaignState});
