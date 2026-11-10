@@ -3,6 +3,33 @@
 importScripts('data_utils.js');
 const CAMPAIGN_KEY='glcsv_campaign';
 
+async function pauseInterruptedWork(reason) {
+  const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
+  const campaign=stored[CAMPAIGN_KEY];
+  const state=stored.glcsv_state;
+  const now=Date.now();
+  const logEntry={time:new Date(now).toISOString(),level:'warn',event:'La extensión se recargó; progreso recuperable guardado',details:{reason}};
+  const updates={};
+  if(campaign&&['starting','running'].includes(campaign.status)) {
+    updates[CAMPAIGN_KEY]={...campaign,status:'paused',message:'Chrome recargó la extensión durante la campaña. El progreso guardado está disponible; pulsa «Continuar campaña».',updatedAt:now};
+  }
+  if(state?.status==='running') {
+    const logs=Array.isArray(state.logs)?state.logs:[];
+    logs.push(logEntry);
+    updates.glcsv_state={...state,status:'paused',message:'Chrome recargó la extensión. Los resultados guardados siguen disponibles; puedes continuar desde el progreso guardado.',logs:logs.slice(-200),updatedAt:now};
+  } else if(updates[CAMPAIGN_KEY]&&state) {
+    const logs=Array.isArray(state.logs)?state.logs:[];
+    logs.push(logEntry);
+    updates.glcsv_state={...state,logs:logs.slice(-200),updatedAt:now};
+  }
+  if(Object.keys(updates).length)await chrome.storage.local.set(updates);
+}
+
+chrome.runtime.onInstalled.addListener(details=>{
+  if(details.reason==='update')pauseInterruptedWork('extension_update').catch(()=>{});
+});
+chrome.runtime.onStartup.addListener(()=>pauseInterruptedWork('browser_startup').catch(()=>{}));
+
 async function appendBackgroundLog(level,event,details={}) {
   const {glcsv_state:state={}}=await chrome.storage.local.get('glcsv_state');
   const logs=Array.isArray(state.logs)?state.logs:[];

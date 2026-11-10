@@ -47,7 +47,7 @@
 4. Haz clic en **Cargar descomprimida**.
 5. Selecciona la carpeta **Google Maps Scraper - Extension Chrome** que contiene `manifest.json`.
 6. Abre la extensión, escribe una búsqueda, por ejemplo “cafeterías en Palermo”, y haz clic en **Buscar y comenzar extracción**. Se abrirá Google Maps en una pestaña nueva y la extracción comenzará automáticamente.
-7. Puedes cambiar de pestaña mientras se extraen los resultados. Si la extracción se detiene, pulsa **Continuar extracción guardada** para retomar el progreso; si hace falta, la extensión volverá a abrir Maps en segundo plano.
+7. Puedes cambiar de pestaña mientras se extraen los resultados. Si la extracción se detiene, pulsa **Continuar extracción guardada** para retomar el progreso; si hace falta, la extensión volverá a abrir Maps en segundo plano. Si Chrome reinicia o actualiza la extensión durante una campaña, el avance persistido queda pausado para que puedas continuar.
 8. Para buscar en varias ciudades, usa **Búsqueda por varias ciudades** debajo del buscador normal. Escribe el rubro, elige Argentina y marca una o más provincias; desmarca una casilla para quitar una provincia. La campaña buscará en cada ciudad de las provincias marcadas, en orden, y acumulará los resultados. Si no marcas ninguna, recorrerá las ciudades cargadas de todas las provincias argentinas, una por una.
 9. La campaña avanza automáticamente cuando Maps deja de cargar resultados en una ciudad. Puedes pausarla y continuarla desde la ubicación en curso; al reanudar, conserva la pestaña y omite las fichas ya procesadas.
 10. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.

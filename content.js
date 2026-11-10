@@ -564,7 +564,21 @@
       const parsedLimit=Number(message.limit);
       const limit=Number.isInteger(parsedLimit) && parsedLimit>=0 ? within(parsedLimit,0,100000) : 0;
       currentRun=scan({limit,searchUrl:message.searchUrl || location.href,tabId:message.tabId,
-        country:message.country || "auto",campaignId:message.campaignId||"",campaignQuery:message.campaignQuery||""});
+        country:message.country || "auto",campaignId:message.campaignId||"",campaignQuery:message.campaignQuery||""})
+        .catch(async err=>{
+          // scan() also performs storage reads before its internal try/finally.
+          // Consume failures there (including a context invalidated by reload)
+          // so they don't surface as an unhandled promise rejection.
+          try {
+            const stored=(await chrome.storage.local.get(STATE_KEY))[STATE_KEY];
+            if(!stored)return;
+            const logs=Array.isArray(stored.logs)?stored.logs:[];
+            logs.push({time:new Date().toISOString(),level:'error',event:'No se pudo iniciar o continuar el escaneo',details:{error:String(err?.message||err)}});
+            const resumeLabel=message.campaignId?'Continuar campaña':'Continuar extracción guardada';
+            await writeState({...stored,status:'paused',message:`La extensión se interrumpió. Los resultados guardados siguen disponibles; pulsa «${resumeLabel}» para retomar.`,logs:logs.slice(-MAX_LOG_ENTRIES),updatedAt:Date.now()});
+          } catch {}
+        })
+        .finally(()=>{running=false;currentRun=null;stopped=false;});
       sendResponse({ok:true});
     } else if (message?.type==="GLCSV_STOP") {
       stopped=true;
