@@ -510,7 +510,7 @@
       if(row?.businessUrl)pendingDetails.set(row.businessUrl,row);
     const detailQueue=[];
     const activeDetailTasks=new Set();
-    const DETAIL_CONCURRENCY=2, MAX_DETAIL_BACKLOG=10;
+    const DETAIL_CONCURRENCY=4, MAX_DETAIL_BACKLOG=12;
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
     const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
