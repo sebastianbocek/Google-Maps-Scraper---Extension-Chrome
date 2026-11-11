@@ -88,6 +88,34 @@ function waitForTabComplete(tabId,timeoutMs=60000) {
   });
 }
 
+async function protectMapsTabFromDiscard(tabId) {
+  try {
+    const tab=await chrome.tabs.update(tabId,{autoDiscardable:false});
+    return {ok:true,autoDiscardable:tab?.autoDiscardable};
+  } catch(error) {
+    return {ok:false,error:String(error?.message||error)};
+  }
+}
+
+// A hidden Maps tab may be throttled or frozen by Chrome. We cannot override
+// Chrome's Energy Saver freezing, but we can prevent ordinary memory discards
+// and make a freeze visible in the user's activity log.
+chrome.tabs.onUpdated.addListener((tabId,changeInfo,tab)=>{
+  if(changeInfo.frozen!==true&&changeInfo.discarded!==true&&changeInfo.frozen!==false)return;
+  (async()=>{
+    const {glcsv_state:state={},[CAMPAIGN_KEY]:campaign}=await chrome.storage.local.get(['glcsv_state',CAMPAIGN_KEY]);
+    if(state.tabId!==tabId&&campaign?.tabId!==tabId)return;
+    if(changeInfo.frozen===true||changeInfo.discarded===true) {
+      await appendBackgroundLog('warn',changeInfo.frozen?'Chrome congeló la pestaña de Maps':'Chrome descartó la pestaña de Maps',{
+        tabId,frozen:Boolean(tab.frozen),discarded:Boolean(tab.discarded),
+        hint:'El progreso ya guardado se conserva. Al volver a activar Maps, Chrome la reanudará; agrega google.com a los sitios siempre activos de Rendimiento para evitar congelamientos.'
+      });
+    } else if(changeInfo.frozen===false) {
+      await appendBackgroundLog('info','Chrome reactivó la pestaña de Maps',{tabId,discarded:Boolean(tab.discarded)});
+    }
+  })().catch(()=>{});
+});
+
 async function enrichPlaceInWorkerTab(row) {
   const url=String(row?.businessUrl||'');
   let parsed;
@@ -121,6 +149,10 @@ async function openMapsSearchAndStart(message) {
   const url=`https://www.google.com/maps/search/${encodeURIComponent(query)}`;
   const tab=await chrome.tabs.create({url,active:true});
   if(tab.id==null)throw new Error('Chrome no pudo crear la pestaña de Google Maps.');
+  const protection=await protectMapsTabFromDiscard(tab.id);
+  await appendBackgroundLog('info','Búsqueda preparada para seguir en segundo plano',{
+    tabId:tab.id,autoDiscardable:protection.autoDiscardable,protectionError:protection.error
+  });
   await waitForTabComplete(tab.id);
   await chrome.scripting.executeScript({target:{tabId:tab.id},files:['data_utils.js','content.js']});
   const loadedTab=await chrome.tabs.get(tab.id);
@@ -177,7 +209,7 @@ async function launchCampaignQuery(campaign) {
       await appendBackgroundLog('warn','La pestaña tenía otra búsqueda; restaurando la consulta de la campaña',{
         campaignId:current.id,location:item.label,expectedQuery:item.query,visibleMapsQuery,url:tab.url
       });
-    await chrome.tabs.update(tab.id,{...((sameSearch||keepCurrentMapsState)?{}:{url}),active:false});
+    await chrome.tabs.update(tab.id,{...((sameSearch||keepCurrentMapsState)?{}:{url}),active:false,autoDiscardable:false});
     if(keepCurrentMapsState) {
       await appendBackgroundLog('info','Reanudando campaña en la pestaña y posición guardadas',{
         campaignId:current.id,query:item.query,tabId:tab.id,
@@ -188,6 +220,10 @@ async function launchCampaignQuery(campaign) {
     tab=await chrome.tabs.create({url,active:current.index===0});
   }
   if(tab.id==null)throw new Error('Chrome no pudo abrir Google Maps para la campaña.');
+  const protection=await protectMapsTabFromDiscard(tab.id);
+  await appendBackgroundLog('info','Pestaña de campaña preparada para segundo plano',{
+    campaignId:current.id,tabId:tab.id,autoDiscardable:protection.autoDiscardable,protectionError:protection.error
+  });
   const beforeWait=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
   if(!beforeWait||beforeWait.id!==current.id||beforeWait.status==='paused')return {ok:true,paused:true,tabId:tab.id};
   await chrome.storage.local.set({[CAMPAIGN_KEY]:{...beforeWait,tabId:tab.id,status:'starting',message:`Abriendo ${item.label} (${current.index+1} de ${current.queries.length})…`,updatedAt:Date.now()}});
@@ -342,6 +378,10 @@ async function continueSavedSearch() {
     tab=await chrome.tabs.create({url:state.searchUrl,active:false});
     if(tab.id==null)throw new Error('Chrome no pudo recuperar la pestaña de Maps.');
   }
+  const protection=await protectMapsTabFromDiscard(tab.id);
+  await appendBackgroundLog('info','Extracción guardada preparada para segundo plano',{
+    tabId:tab.id,autoDiscardable:protection.autoDiscardable,protectionError:protection.error
+  });
   if(tab.status!=='complete')await waitForTabComplete(tab.id);
   await chrome.scripting.executeScript({target:{tabId:tab.id},files:['data_utils.js','content.js']});
   const result=await chrome.tabs.sendMessage(tab.id,{

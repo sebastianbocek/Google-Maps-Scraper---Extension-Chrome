@@ -317,18 +317,23 @@
     return null;
   }
   async function waitForPanel(name, timeout=4400) {
-    const begin = Date.now();
-    let panel = null;
-    while (!stopped && Date.now()-begin < timeout) {
-      panel = findBusinessPanel(name);
-      // Panel puede existir mientras todavía cambia el teléfono/web.
-      if (panel && (phoneFromNode(panel) || externalWebsite(panel))) {
-        await wait(280);
-        return findBusinessPanel(name) || panel;
-      }
-      await wait(190);
-    }
-    return panel;
+    const ready=()=>{
+      const panel=findBusinessPanel(name);
+      return panel&&(phoneFromNode(panel)||externalWebsite(panel))?panel:null;
+    };
+    const initial=ready();
+    if(initial)return initial;
+    return new Promise(resolve=>{
+      let settled=false;
+      const finish=value=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);observer.disconnect();resolve(value||findBusinessPanel(name));
+      };
+      const observer=new MutationObserver(()=>{if(stopped){finish(null);return;}const panel=ready();if(panel)finish(panel);});
+      observer.observe(document.body||document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-label","data-item-id"]});
+      const timer=setTimeout(()=>finish(null),timeout);
+      if(stopped)finish(null);else {const panel=ready();if(panel)finish(panel);}
+    });
   }
   async function extractPlaceDetails(baseRow) {
     const started=Date.now();
@@ -535,16 +540,28 @@
     return false;
   }
   async function waitForResultsOutcome(previousCount,timeout=10000) {
-    const started=Date.now();
-    let stableSince=Date.now();
-    while(Date.now()-started<timeout) {
-      if(hasNoMoreResults())return {endReached:true,loading:false};
-      if(selectCards().length>previousCount)return {endReached:false,loading:resultsSpinnerVisible()};
-      if(resultsSpinnerVisible())stableSince=Date.now();
-      else if(Date.now()-stableSince>=1100)return {endReached:false,loading:false};
-      await wait(250);
-    }
-    return {endReached:hasNoMoreResults(),loading:resultsSpinnerVisible()};
+    // MutationObserver is not subject to the chained-timer throttling applied
+    // to hidden tabs. Use a timer only as a bounded fallback if Maps is idle.
+    const root=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||document.body||document.documentElement;
+    return new Promise(resolve=>{
+      let settled=false,quietTimer=null;
+      const finish=result=>{
+        if(settled)return;
+        settled=true;clearTimeout(hardTimer);clearTimeout(quietTimer);observer.disconnect();resolve(result);
+      };
+      const check=()=>{
+        if(stopped){finish({endReached:false,loading:resultsSpinnerVisible(),stopped:true});return;}
+        if(hasNoMoreResults()){finish({endReached:true,loading:false});return;}
+        const count=selectCards().length;
+        if(count>previousCount){finish({endReached:false,loading:resultsSpinnerVisible(),cardsAfter:count});return;}
+        if(resultsSpinnerVisible()){clearTimeout(quietTimer);quietTimer=null;}
+        else if(!quietTimer)quietTimer=setTimeout(()=>finish({endReached:false,loading:false,cardsAfter:selectCards().length}),1100);
+      };
+      const observer=new MutationObserver(check);
+      observer.observe(root,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-busy","aria-label","class","style"]});
+      const hardTimer=setTimeout(()=>finish({endReached:hasNoMoreResults(),loading:resultsSpinnerVisible(),cardsAfter:selectCards().length,timeout:true}),timeout);
+      check();
+    });
   }
   function cardDetailHeadingVisible(name) {
     const target=canonical(name);
@@ -705,6 +722,21 @@
       return persistChain;
     };
     const flushCheckpoint=async()=>{if(writesSinceCheckpoint){writesSinceCheckpoint=0;await saveSnapshot();}else await persistChain;};
+    let lastVisibility=document.visibilityState;
+    const onVisibilityChange=()=>{
+      const visibility=document.visibilityState||"unknown";
+      if(visibility===lastVisibility)return;
+      lastVisibility=visibility;
+      logEvent(state,"info",visibility==="hidden"?
+        "Maps quedó en segundo plano; la extracción continúa y el progreso se guarda":
+        "Maps volvió al primer plano; la extracción continúa desde el mismo punto",{
+          tabId,visibility,rows:rows.size,inspected:inspected.size,pendingDetails:pendingDetails.size
+        });
+      state.updatedAt=Date.now();
+      if(visibility==="hidden")saveSnapshot().catch(()=>{});
+      else scheduleCheckpoint(true);
+    };
+    document.addEventListener("visibilitychange",onVisibilityChange);
     const mergeEnrichedRow=(base,detail)=>{
       const merged=combineRow(base,detail,country,searchUrl);
       const queryIndex=queryRows.findIndex(row=>(row.businessUrl&&row.businessUrl===merged.businessUrl)||utils.sameBusiness(row,base));
@@ -803,7 +835,6 @@
           count++;
           if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
             while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
-          if (!stopped&&!add.businessUrl) await wait(180);
         }
         if (stopped || (limit>0 && queryProcessed>=limit)) break;
         state.message=`Buscando más resultados... (${rows.size} guardados)`;
@@ -964,6 +995,7 @@
       state.pendingDetails=[...pendingDetails.values()];
       state.updatedAt=Date.now();
       await flushCheckpoint().catch(()=>{});
+      document.removeEventListener("visibilitychange",onVisibilityChange);
       showOverlay(state.message);
       if (ui?.stop) {ui.stop.disabled=true;ui.stop.textContent="Finalizado";}
       setTimeout(hideOverlay,4500);
