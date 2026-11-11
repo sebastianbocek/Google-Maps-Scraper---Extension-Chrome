@@ -495,6 +495,20 @@
     const fresh=selectCards().filter(card=>!inspected.has(card.key));
     return {endReached:hasNoMoreResults()&&!fresh.length,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
   }
+  async function restorePreviouslyLoadedResults(targetCount,maxSteps=80) {
+    let steps=0,lastCount=selectCards().length;
+    while(steps<maxSteps&&!stopped) {
+      const cards=selectCards();
+      if(cards.length>=targetCount)return {restored:true,steps,cards:cards.length,targetCount};
+      if(hasNoMoreResults())return {restored:false,endReached:true,steps,cards:cards.length,targetCount};
+      await advanceResults(cards);
+      steps++;
+      const currentCount=selectCards().length;
+      if(currentCount>lastCount)lastCount=currentCount;
+    }
+    const cards=selectCards();
+    return {restored:cards.length>=targetCount,endReached:hasNoMoreResults(),steps,cards:cards.length,targetCount,lastCount};
+  }
   function hasNoMoreResults() {
     const endings=new Set(["no hay mas resultados","no more results"]);
     const scope=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||getScrollTarget(selectCards())||document.body;
@@ -754,7 +768,28 @@
         let hasNew=selectCards().some(c=>!inspected.has(c.key));
         const endMarkerVisible=Boolean(scroll.endReached||hasNoMoreResults());
         endReached=endMarkerVisible&&!hasNew;
-        noProgress=endReached?0:(hasNew||count>0?0:noProgress+1);
+        let listResetRecovery=null;
+        // Al volver desde una ficha, Maps puede reconstruir el feed en el
+        // comienzo (por ejemplo, 118 tarjetas pasan a 8 y scrollTop a 0).
+        // Recupera el tramo ya cargado antes de iniciar otro ciclo de scroll.
+        const countDropped=Number(scroll.cardsBefore)>=30&&Number(scroll.cardsAfter)<Number(scroll.cardsBefore)*.45;
+        const jumpedToStart=Number(scroll.topBefore)>1000&&Number(scroll.topAfter)<1000;
+        if(!endReached&&!stopped&&countDropped&&jumpedToStart) {
+          logEvent(state,"warn","Maps reinició la lista; recuperando el tramo cargado antes de continuar",{
+            cardsBefore:scroll.cardsBefore,cardsAfter:scroll.cardsAfter,topBefore:scroll.topBefore,topAfter:scroll.topAfter
+          });
+          listResetRecovery=await restorePreviouslyLoadedResults(Number(scroll.cardsBefore),80);
+          hasNew=selectCards().some(c=>!inspected.has(c.key));
+          const restoredEnd=Boolean(listResetRecovery.endReached||hasNoMoreResults());
+          endReached=restoredEnd&&!hasNew;
+          if(listResetRecovery.restored)noProgress=0;
+          logEvent(state,listResetRecovery.restored?"info":"warn",listResetRecovery.restored?
+            "Tramo previamente cargado recuperado; retomando desde las fichas nuevas":
+            "No se pudo recuperar todo el tramo anterior; se conserva la misma ciudad y se sigue cargando",{
+              ...listResetRecovery,hasUnseenCard:hasNew,endReached
+            });
+        }
+        noProgress=endReached?0:(hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           while(!stopped&&!endReached&&!hasNew) {
@@ -797,7 +832,7 @@
           recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,listResetRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
