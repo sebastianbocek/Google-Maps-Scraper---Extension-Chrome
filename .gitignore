@@ -1,0 +1,7 @@
+# Windows Explorer caches must not be included in Chrome extension packages.
+Thumbs.db
+thumbs.db
+**/Thumbs.db
+**/thumbs.db
+desktop.ini
+**/desktop.ini

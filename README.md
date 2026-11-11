@@ -25,7 +25,7 @@
 - Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
-- Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa hasta cuatro fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
+- Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa hasta cinco fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
 - Guarda la cola de fichas pendientes junto con los resultados; al continuar, reintenta el enriquecimiento pendiente sin volver a recorrer las fichas ya guardadas.
 - Permite marcar y desmarcar categorías de negocio con casillas antes de exportar. Todas comienzan desmarcadas; hay acciones para seleccionar todas o ninguna y el contador se actualiza al instante.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
@@ -43,7 +43,7 @@
 
 ## Instalación en Chrome
 
-1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela. El ZIP contiene una carpeta llamada **Google Maps Scraper - Extension Chrome**.
+1. [Descarga la extensión en ZIP](https://github.com/sebastianbocek/Google-Maps-Scraper---Extension-Chrome/releases/latest/download/google-maps-scraper-extension.zip) y descomprímela. El ZIP contiene una carpeta llamada **Google Maps Scraper - Extension Chrome**. Si Chrome advierte que `Thumbs.db` tiene un nombre ilegal, elimina ese archivo oculto de la carpeta y vuelve a cargarla; es una caché de miniaturas de Windows, no un archivo de la extensión.
 2. Abre `chrome://extensions/` en Chrome.
 3. Activa **Modo desarrollador** en la parte superior derecha.
 4. Haz clic en **Cargar descomprimida**.
