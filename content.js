@@ -744,6 +744,7 @@
     let iterations=0;
     let endReached=false;
     let emptyFeedRecoveryAttempts=0;
+    let emptyFeedAdvance=false;
     const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
     const recoveryTried=new Set();
     let finishReason="error";
@@ -870,8 +871,18 @@
                     refreshedCards:refreshed.length,hasUnseenCard:hasNew,endReached
                   });
                 if(endReached||hasNew||refreshed.length) {noProgress=0;break;}
-                if(emptyFeedRecoveryAttempts>=2)
-                  throw new Error(`Maps no volvió a mostrar resultados para «${expectedQuery}». La consulta quedó guardada; reanudá la campaña para reintentar.`);
+                if(emptyFeedRecoveryAttempts>=2) {
+                  if(campaignId) {
+                    emptyFeedAdvance=true;
+                    logEvent(state,"warn","La lista no reapareció tras dos intentos; la campaña avanzará sin confirmar el fin de esta ciudad",{
+                      campaignId,campaignQuery,expectedQuery,emptyFeedRecoveryAttempts,rows:rows.size,
+                      endMarkerConfirmed:false,refreshedCards:refreshed.length
+                    });
+                    noProgress=0;
+                    break;
+                  }
+                  throw new Error(`Maps no volvió a mostrar resultados para «${expectedQuery}» tras dos intentos. Los resultados guardados siguen disponibles.`);
+                }
                 await wait(900);
                 noProgress=MAX_NO_PROGRESS;
                 await scheduleCheckpoint(true);
@@ -893,6 +904,7 @@
             await scheduleCheckpoint(true);
           }
         }
+        if(emptyFeedAdvance)break;
         state.message=endReached?`Google Maps confirmó que no hay más resultados. ${rows.size} fichas guardadas.`:
           endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
           recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
@@ -909,7 +921,7 @@
       // el fin, así que reabrimos las fichas fallidas hasta completar la cola.
       // El usuario puede detener la campaña mientras espera/reintenta.
       let pendingRetryRound=0;
-      while(campaignId&&endReached&&!stopped&&pendingDetails.size){
+      while(campaignId&&(endReached||emptyFeedAdvance)&&!stopped&&pendingDetails.size){
         pendingRetryRound++;
         detailQueue.push(...pendingDetails.values());
         state.message=`Reintentando ${pendingDetails.size} fichas pendientes antes de avanzar (${pendingRetryRound})…`;
@@ -927,17 +939,18 @@
       const detailsNeedRetry=pendingDetails.size>0;
       const limitStoppedCampaign=Boolean(campaignId&&limitReached&&!endReached);
       const stalledWithoutEnd=!stopped&&!endReached&&limitStoppedCampaign;
-      const needsContinue=!stopped&&(detailsNeedRetry||stalledWithoutEnd);
+      const needsContinue=!stopped&&(detailsNeedRetry||stalledWithoutEnd)&&!emptyFeedAdvance;
       state.status=stopped||needsContinue?"paused":"complete";
-      finishReason=stopped?"manual":needsContinue?"error":limitReached?"limit":"complete";
+      finishReason=stopped?"manual":emptyFeedAdvance?"empty-view":needsContinue?"error":limitReached?"limit":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
+        emptyFeedAdvance?`Maps no recuperó la lista tras dos intentos. La campaña continúa con la próxima ciudad; ${rows.size} fichas guardadas.`:
         detailsNeedRetry?`Pausado: ${pendingDetails.size} fichas quedaron pendientes de completar. Pulsa continuar para reintentarlas; tus resultados están guardados.`:
         limitStoppedCampaign?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda pausada aquí; no se iniciará otra ciudad.`:
         limitReached?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
         stalledWithoutEnd?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda aquí; no se iniciará otra ciudad.`:
         endReached?`Finalizado: Maps confirmó que no hay más resultados. ${rows.size} fichas detectadas; CSV disponible.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
-      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,endMarkerConfirmed:endReached,campaignQuery:campaignQuery||undefined,stalledWithoutEnd,detailsNeedRetry,pendingDetails:pendingDetails.size,pendingRetryRound,rows:rows.size});
+      logEvent(state,needsContinue||emptyFeedAdvance?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,endMarkerConfirmed:endReached,campaignQuery:campaignQuery||undefined,stalledWithoutEnd,detailsNeedRetry,pendingDetails:pendingDetails.size,pendingRetryRound,advancedWithoutEndMarker:emptyFeedAdvance,rows:rows.size});
     } catch(err) {
       await settleActiveDetails().catch(()=>{});
       state.status="error";

@@ -245,7 +245,9 @@ async function finishCampaignQuery(message) {
   }
   const currentItem=campaign.queries[campaign.index];
   const currentLabel=currentItem?.label||'ubicación actual';
-  if(!message.endMarkerConfirmed||!['complete','limit'].includes(message.reason)) {
+  const confirmedEnd=Boolean(message.endMarkerConfirmed&&['complete','limit'].includes(message.reason));
+  const emptyViewAdvance=message.reason==='empty-view'&&!message.endMarkerConfirmed;
+  if(!confirmedEnd&&!emptyViewAdvance) {
     const text=`La búsqueda de ${currentLabel} no confirmó “No hay más resultados”; no se avanzó a otra ciudad. Podés continuar desde aquí.`;
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:text,updatedAt:Date.now()}});
     await appendBackgroundLog('error','Avance de ciudad bloqueado: falta confirmar el marcador de fin',{
@@ -255,16 +257,21 @@ async function finishCampaignQuery(message) {
     });
     return {ok:true,paused:true,blocked:true};
   }
-  await appendBackgroundLog('info','Ciudad completada: Google Maps confirmó el fin de resultados',{
-    campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
-    location:currentLabel,query:currentItem?.query,reason:message.reason,
-    endMarkerConfirmed:true,rows:message.rows||0
-  });
+  await appendBackgroundLog(emptyViewAdvance?'warn':'info',emptyViewAdvance?
+    'Ciudad sin lista recuperable; se avanza tras dos intentos':'Ciudad completada: Google Maps confirmó el fin de resultados',{
+      campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
+      location:currentLabel,query:currentItem?.query,reason:message.reason,
+      endMarkerConfirmed:Boolean(message.endMarkerConfirmed),advancedWithoutEndMarker:emptyViewAdvance,
+      rows:message.rows||0
+    });
   const nextIndex=campaign.index+1;
   if(nextIndex>=campaign.queries.length) {
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'complete',index:campaign.index,message:`Campaña completa: ${campaign.queries.length} ubicaciones procesadas.`,updatedAt:Date.now()}});
-    await appendBackgroundLog('info','Campaña completa: todas las ciudades terminaron con marcador confirmado',{
-      campaignId:campaign.id,total:campaign.queries.length,finalLocation:currentLabel
+    await appendBackgroundLog('info',emptyViewAdvance?
+      'Campaña completa; la última ciudad avanzó tras quedarse sin lista recuperable':
+      'Campaña completa: todas las ciudades terminaron con marcador confirmado',{
+      campaignId:campaign.id,total:campaign.queries.length,finalLocation:currentLabel,
+      finalCityEndMarkerConfirmed:Boolean(message.endMarkerConfirmed)
     });
     return {ok:true,complete:true};
   }
@@ -272,9 +279,10 @@ async function finishCampaignQuery(message) {
   await appendBackgroundLog('info','Avance automático a la siguiente ciudad',{
     campaignId:campaign.id,fromIndex:campaign.index+1,toIndex:nextIndex+1,
     total:campaign.queries.length,from:currentLabel,to:nextItem.label,
-    reason:'No hay más resultados confirmado',endMarkerConfirmed:true,rows:message.rows||0
+    reason:emptyViewAdvance?'Lista no recuperable tras dos intentos':'No hay más resultados confirmado',
+    endMarkerConfirmed:Boolean(message.endMarkerConfirmed),advancedWithoutEndMarker:emptyViewAdvance,rows:message.rows||0
   });
-  const next={...campaign,index:nextIndex,status:'starting',message:`Ubicación terminada. Siguiente: ${campaign.queries[nextIndex].label} (${nextIndex+1} de ${campaign.queries.length})…`,updatedAt:Date.now()};
+  const next={...campaign,index:nextIndex,status:'starting',message:`${emptyViewAdvance?'Lista de Maps no recuperable. ':''}Siguiente: ${campaign.queries[nextIndex].label} (${nextIndex+1} de ${campaign.queries.length})…`,updatedAt:Date.now()};
   await chrome.storage.local.set({[CAMPAIGN_KEY]:next});
   try {return await launchCampaignQuery(next);}
   catch(error) {
