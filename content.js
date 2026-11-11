@@ -330,6 +330,47 @@
     }
     return panel;
   }
+  async function extractPlaceDetails(baseRow) {
+    const started=Date.now();
+    let title=null;
+    while(Date.now()-started<9000) {
+      title=document.querySelector('h1.DUwDvf, h1[role="heading"], h1');
+      if(title&&safeText(title))break;
+      await wait(180);
+    }
+    // The worker visits a public Maps place URL in its own inactive tab. Read
+    // the rendered page DOM; do not call undocumented Maps endpoints.
+    await wait(260);
+    let scope=null, bestScore=-1;
+    for(let node=title,d=0;node&&node!==document.body&&d<14;node=node.parentElement,d++) {
+      const textLength=(node.innerText||"").length;
+      if(textLength>16000)continue;
+      const hasPhone=!!node.querySelector(SELECTORS.phone);
+      const hasAddress=!!node.querySelector('[data-item-id^="address"],[aria-label^="Dirección:" i],[aria-label^="Address:" i]');
+      const hasWebsite=!!node.querySelector('[data-item-id*="authority"],a[aria-label*="sitio web" i],a[aria-label*="website" i]');
+      const score=(hasPhone?28:0)+(hasAddress?16:0)+(hasWebsite?8:0)+(textLength>80?4:0)+(node===title.parentElement?3:0);
+      if(score>bestScore){bestScore=score;scope=node;}
+      if(hasPhone&&hasAddress&&hasWebsite&&textLength>80)break;
+    }
+    // Do not inspect the whole page when no business panel can be isolated:
+    // nearby businesses may otherwise contribute the wrong phone or website.
+    if(!scope||bestScore<8)return {...baseRow,businessUrl:baseRow.businessUrl||location.href};
+    const address=findAddress(scope);
+    const phone=phoneFromNode(scope);
+    const website=externalWebsite(scope);
+    const rating=findRating(scope);
+    const category=findCategory(scope,true);
+    return {
+      ...baseRow,
+      phone:phone||baseRow.phone||"",
+      address:address||baseRow.address||"",
+      location:utils.locality(address||baseRow.address||"")||baseRow.location||"",
+      website:website||baseRow.website||"",
+      rating:rating||baseRow.rating||"",
+      category:category||baseRow.category||"",
+      businessUrl:baseRow.businessUrl||location.href
+    };
+  }
   function clickCard(card) {
     const root = card.element;
     if (!root?.isConnected) return false;
@@ -463,7 +504,56 @@
       (!campaignId&&canResume?(Array.isArray(existing.queryRows)?existing.queryRows:saved):[]);
     const queryRows=utils.dedupeRows(previousQueryRows);
     let queryProcessed=queryRows.length;
-    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:3, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const keepPending=campaignId?sameCampaign:canResume;
+    const pendingDetails=new Map();
+    if(keepPending&&Array.isArray(existing.pendingDetails))for(const row of existing.pendingDetails)
+      if(row?.businessUrl)pendingDetails.set(row.businessUrl,row);
+    const detailQueue=[];
+    const activeDetailTasks=new Set();
+    const DETAIL_CONCURRENCY=2, MAX_DETAIL_BACKLOG=10;
+    let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
+    let persistChain=Promise.resolve();
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const snapshot=()=>({...state,rows:[...rows.values()].map(row=>({...row})),queryRows:queryRows.map(row=>({...row})),inspectedIds:[...inspected],pendingDetails:[...pendingDetails.values()].map(row=>({...row})),logs:[...(state.logs||[])]});
+    const saveSnapshot=()=>{const copy=snapshot();persistChain=persistChain.catch(()=>{}).then(()=>writeState(copy));lastCheckpoint=Date.now();return persistChain;};
+    const scheduleCheckpoint=(force=false)=>{
+      writesSinceCheckpoint++;
+      if(force||writesSinceCheckpoint>=8||Date.now()-lastCheckpoint>=2200){writesSinceCheckpoint=0;return saveSnapshot();}
+      return persistChain;
+    };
+    const flushCheckpoint=async()=>{if(writesSinceCheckpoint){writesSinceCheckpoint=0;await saveSnapshot();}else await persistChain;};
+    const mergeEnrichedRow=(base,detail)=>{
+      const merged=combineRow(base,detail,country,searchUrl);
+      const queryIndex=queryRows.findIndex(row=>(row.businessUrl&&row.businessUrl===merged.businessUrl)||utils.sameBusiness(row,base));
+      if(queryIndex>=0)queryRows[queryIndex]=combineRow(queryRows[queryIndex],merged,country,searchUrl);
+      storeUniqueRow(rows,merged,country,searchUrl);
+      state.rows=[...rows.values()];state.queryRows=queryRows;
+      state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>hasRealWebsite(r.website)).length} webs`;
+    };
+    const launchDetailTask=base=>{
+      activeDetails++;
+      const task=(async()=>{
+        try{
+          const result=await chrome.runtime.sendMessage({type:"GLCSV_ENRICH_DETAIL",row:base});
+          if(result?.ok&&result.row){const detail={...result.row};mergeEnrichedRow(base,detail);pendingDetails.delete(base.businessUrl);logEvent(state,"info","Ficha enriquecida en segundo plano",{name:base.name,phone:Boolean(detail.phone),website:hasRealWebsite(detail.website),pending:pendingDetails.size});}
+          else logEvent(state,"warn","Ficha pendiente de enriquecer; se conserva para continuar",{name:base.name,error:result?.error||"Sin datos adicionales"});
+        }catch(error){logEvent(state,"warn","Ficha pendiente de enriquecer; se conserva para continuar",{name:base.name,error:String(error?.message||error)});}
+        finally{
+          activeDetails--;state.pendingDetails=[...pendingDetails.values()];state.updatedAt=Date.now();
+          scheduleCheckpoint();pumpDetailQueue();
+        }
+      })();
+      activeDetailTasks.add(task);task.finally(()=>activeDetailTasks.delete(task));
+    };
+    function pumpDetailQueue(){while(!stopDetailQueue&&activeDetails<DETAIL_CONCURRENCY&&detailQueue.length)launchDetailTask(detailQueue.shift());}
+    const enqueueDetail=base=>{
+      if(!base?.businessUrl||pendingDetails.has(base.businessUrl))return;
+      pendingDetails.set(base.businessUrl,base);state.pendingDetails=[...pendingDetails.values()];detailQueue.push(base);pumpDetailQueue();
+      logEvent(state,"info","Ficha agregada a la cola de detalle",{name:base.name,active:activeDetails,queued:detailQueue.length});
+      scheduleCheckpoint();
+    };
+    const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
+    const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
     logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
@@ -471,6 +561,9 @@
     let iterations=0;
     let finishReason="error";
     try {
+      // Requeue durable work from a previous pause/reload before scanning further.
+      for(const row of pendingDetails.values())detailQueue.push(row);
+      pumpDetailQueue();
       while (!stopped && (limit===0 || queryProcessed < limit) && noProgress < MAX_NO_PROGRESS && iterations < 10000) {
         iterations++;
         const cards=selectCards();
@@ -480,12 +573,16 @@
           if (stopped || (limit>0 && queryProcessed>=limit)) break;
           if (!card.element.isConnected) continue;
           inspected.add(card.key);
-          state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
-          showOverlay(state.message);
-          const clicked=clickCard(card);
-          const panel=clicked ? await waitForPanel(card.name) : null;
           const add=rowFromCard(card,country,searchUrl);
-          if (panel) {
+          if(add.businessUrl){
+            state.message=`En cola ${activeDetails+detailQueue.length+1}: ${card.name}`;
+            enqueueDetail(add);
+          }else{
+            state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
+            showOverlay(state.message);
+            const clicked=clickCard(card);
+            const panel=clicked ? await waitForPanel(card.name) : null;
+            if (panel) {
             const detailPhone=phoneFromNode(panel);
             const detailRating=findRating(panel);
             const detailWebsite=externalWebsite(panel);
@@ -497,6 +594,7 @@
             if (detailRating) add.rating=detailRating;
             if (detailWebsite) add.website=detailWebsite;
             if (detailCategory) add.category=detailCategory;
+            }
           }
           const queryIndex=queryRows.findIndex(row=>utils.sameBusiness(row,add));
           const duplicateInQuery=queryIndex>=0;
@@ -506,17 +604,20 @@
           state.rows=[...rows.values()];
           state.queryRows=queryRows;
           state.inspectedIds=[...inspected];
+          state.pendingDetails=[...pendingDetails.values()];
           state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>hasRealWebsite(r.website)).length} webs`;
           logEvent(state,duplicateInQuery||stored.duplicate?"warn":"info",duplicateInQuery||stored.duplicate?"Ficha duplicada omitida":"Ficha guardada",{name:card.name,total:rows.size,duplicatesSkipped:duplicateInQuery||stored.duplicate,phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
           state.updatedAt=Date.now();
-          await writeState(state);
+          scheduleCheckpoint();
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
           count++;
-          if (!stopped) await wait(750);
+          if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
+            while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
+          if (!stopped&&!add.businessUrl) await wait(180);
         }
         if (stopped || (limit>0 && queryProcessed>=limit)) break;
         state.message=`Buscando más resultados... (${rows.size} guardados)`;
-        await writeState(state);
+        await flushCheckpoint();
         showOverlay(state.message);
         const beforeNoProgress=noProgress;
         const scroll=await advanceResults(cards);
@@ -525,19 +626,24 @@
         state.message=`Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         logEvent(state,noProgress?"warn":"info","Desplazamiento para cargar más resultados",{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,...scroll});
         state.updatedAt=Date.now();
-        await writeState(state);
+        scheduleCheckpoint();
+        await flushCheckpoint();
         showOverlay(state.message);
       }
+      if(stopped)await settleActiveDetails();else await drainDetailQueue();
       const limitReached=limit>0&&queryProcessed>=limit;
-      const needsContinue=!stopped&&!limitReached&&(noProgress>=MAX_NO_PROGRESS||iterations>=10000);
+      const detailsNeedRetry=pendingDetails.size>0;
+      const needsContinue=!stopped&&(detailsNeedRetry||(!limitReached&&(noProgress>=MAX_NO_PROGRESS||iterations>=10000)));
       state.status=stopped||needsContinue?"paused":"complete";
-      finishReason=stopped?"manual":needsContinue?"exhausted":limitReached?"limit":"complete";
+      finishReason=stopped?"manual":detailsNeedRetry?"error":needsContinue?"exhausted":limitReached?"limit":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
+        detailsNeedRetry?`Pausado: ${pendingDetails.size} fichas quedaron pendientes de completar. Pulsa continuar para reintentarlas; tus resultados están guardados.`:
         limitReached?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
         needsContinue?`Pausado: Maps no cargó nuevos resultados tras ${noProgress} intentos. ${rows.size} fichas guardadas; podés continuar.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
       logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,stopped,rows:rows.size});
     } catch(err) {
+      await settleActiveDetails().catch(()=>{});
       state.status="error";
       finishReason="error";
       state.message=`Interrumpido: ${err?.message || err}. Los ${rows.size} resultados guardados siguen disponibles.`;
@@ -546,8 +652,9 @@
       state.rows=[...rows.values()];
       state.queryRows=queryRows;
       state.inspectedIds=[...inspected];
+      state.pendingDetails=[...pendingDetails.values()];
       state.updatedAt=Date.now();
-      await writeState(state).catch(()=>{});
+      await flushCheckpoint().catch(()=>{});
       showOverlay(state.message);
       if (ui?.stop) {ui.stop.disabled=true;ui.stop.textContent="Finalizado";}
       setTimeout(hideOverlay,4500);
@@ -558,7 +665,10 @@
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {
-    if (message?.type==="GLCSV_START") {
+    if(message?.type==="GLCSV_DETAIL_EXTRACT"){
+      extractPlaceDetails(message.row||{}).then(row=>sendResponse({ok:true,row})).catch(error=>sendResponse({ok:false,error:String(error?.message||error)}));
+      return true;
+    } else if (message?.type==="GLCSV_START") {
       if (running) {sendResponse({ok:false,error:"Ya hay una extracción en marcha."});return;}
       if (!/(\/maps(?:\/|\?|$)|\/search\?)/.test(location.href)) {sendResponse({ok:false,error:"Abrí resultados de Google Local o Google Maps."});return;}
       running=true; stopped=false;

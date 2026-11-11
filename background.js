@@ -79,6 +79,33 @@ function waitForTabComplete(tabId,timeoutMs=60000) {
   });
 }
 
+async function enrichPlaceInWorkerTab(row) {
+  const url=String(row?.businessUrl||'');
+  let parsed;
+  try {parsed=new URL(url);} catch {throw new Error('La ficha no tiene una URL válida de Google Maps.');}
+  if(!/(^|\.)google\.[a-z.]+$/i.test(parsed.hostname)||!parsed.pathname.startsWith('/maps/'))
+    throw new Error('La URL de detalle no pertenece a una ficha pública de Google Maps.');
+  let lastError;
+  for(let attempt=1;attempt<=2;attempt++) {
+    let tabId=null;
+    try {
+      const tab=await chrome.tabs.create({url,active:false});
+      tabId=tab.id;
+      if(tabId==null)throw new Error('Chrome no pudo abrir la ficha en segundo plano.');
+      await waitForTabComplete(tabId,35000);
+      await chrome.scripting.executeScript({target:{tabId},files:['data_utils.js','content.js']});
+      const result=await chrome.tabs.sendMessage(tabId,{type:'GLCSV_DETAIL_EXTRACT',row});
+      if(!result?.ok)throw new Error(result?.error||'No se pudieron leer los datos de la ficha.');
+      return result.row;
+    } catch(error) {
+      lastError=error;
+    } finally {
+      if(tabId!=null)await chrome.tabs.remove(tabId).catch(()=>{});
+    }
+  }
+  throw lastError||new Error('No se pudieron leer los datos de la ficha.');
+}
+
 async function openMapsSearchAndStart(message) {
   const query=String(message.query||'').trim();
   if(!query)throw new Error('Escribí una búsqueda antes de comenzar.');
@@ -277,6 +304,14 @@ async function stopSavedSearch() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if(message?.type==='GLCSV_ENRICH_DETAIL') {
+    enrichPlaceInWorkerTab(message.row).then(row=>respond({ok:true,row})).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('warn','No se pudo enriquecer una ficha en segundo plano',{name:message.row?.name||'',error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
+    return true;
+  }
   if (message?.type === 'GLCSV_SEARCH_AND_START') {
     openMapsSearchAndStart(message).then(respond).catch(async error=>{
       const messageText=String(error?.message||error);

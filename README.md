@@ -25,6 +25,8 @@
 - Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
+- Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa hasta dos fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
+- Guarda la cola de fichas pendientes junto con los resultados; al continuar, reintenta el enriquecimiento pendiente sin volver a recorrer las fichas ya guardadas.
 - Permite marcar y desmarcar categorías de negocio con casillas antes de exportar. Todas comienzan desmarcadas; hay acciones para seleccionar todas o ninguna y el contador se actualiza al instante.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
