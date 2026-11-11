@@ -12,7 +12,7 @@
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
   let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]},campaignLogs=[];
-  let loading=true;
+  let loading=true,stateReady=false,renderTimer=0;
   const UNKNOWN="__unknown__";
   for(const province of Object.keys(globalThis.GLCSVLocations||{})) {
     const label=document.createElement("label");label.className="province-option";
@@ -37,9 +37,14 @@
   const rows=()=>Array.isArray(state.rows)?state.rows:[];
   function normalizeState(value) {
     const next=value||initial();
-    if(!Array.isArray(next.rows))return next;
-    const unique=util.dedupeRows(next.rows);
-    return unique.length===next.rows.length?next:{...next,rows:unique};
+    if(!Array.isArray(next.rows))return {...next,rows:[]};
+    // The scraper already stores unique rows. Avoid an O(n²) dedupe on every
+    // popup open and every storage update during a large campaign.
+    if(Number(next.schemaVersion||0)<4) {
+      const unique=util.dedupeRows(next.rows);
+      return unique.length===next.rows.length?next:{...next,rows:unique,schemaVersion:4};
+    }
+    return next;
   }
   function rowLocation(row) {return (row.location || util.locality(row.address || "") || "").trim();}
   function rowCategory(row) {return (row.category||"").trim();}
@@ -68,7 +73,7 @@
     const selectedCats=new Set(filters.includedCategories||[]),badCities=new Set(filters.excludedLocations||[]);
     const targetCity=filters.strictLocation?target():"";
     const websiteMode=filters.websiteMode||"all",phoneMode=filters.phoneMode||"all";
-    return util.dedupeRows(rows()).filter(row=>selectedCats.has(groupKey(rowCategory(row))) &&
+    return rows().filter(row=>selectedCats.has(groupKey(rowCategory(row))) &&
       !badCities.has(groupKey(rowLocation(row))) && inTarget(row,targetCity) &&
       (websiteMode==="all" || (websiteMode==="with" ? hasRealWebsite(row) : !hasRealWebsite(row))) &&
       (phoneMode==="all" || (phoneMode==="with" ? Boolean(String(row.phone||"").trim()) : !String(row.phone||"").trim())));
@@ -109,12 +114,16 @@
     return `[${time}] [${level}] ${entry.event||"Evento"}${details}`;
   }
   function allLogs() {
-    const unique=new Map();
-    for(const entry of [...(state.logs||[]),...campaignLogs]) {
+    const recent=state.logs||[],history=campaignLogs,merged=[],seen=new Set();
+    let i=0,j=0;
+    while(i<recent.length||j<history.length) {
+      const a=recent[i],b=history[j];
+      const takeRecent=!b||(a&&String(a.time||"")<=String(b.time||""));
+      const entry=takeRecent?recent[i++]:history[j++];
       const key=`${entry.time||""}|${entry.event||""}|${entry.details?.campaignId||""}`;
-      unique.set(key,entry);
+      if(!seen.has(key)){merged.push(entry);seen.add(key);}
     }
-    return [...unique.values()].sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")));
+    return merged;
   }
   function renderLog(entries) {
     const logs=Array.isArray(entries)?entries:[];
@@ -201,13 +210,13 @@
     const campaignBlockingNormal=campaignRunning||campaignPaused;
     els.campaignStatus.textContent=campaignState.message||"Sin campaña activa.";
     if(campaignState.queries?.length)els.campaignStatus.textContent+=` · ${Math.min((campaignState.index||0)+1,campaignState.queries.length)} / ${campaignState.queries.length}`;
-    els.campaignStart.disabled=campaignRunning||state.status==="running"||!els.campaignQuery.value.trim();
+    els.campaignStart.disabled=!stateReady||campaignRunning||state.status==="running"||!els.campaignQuery.value.trim();
     els.campaignQuery.disabled=campaignRunning;
     els.campaignCountry.disabled=campaignRunning;
     for(const checkbox of els.campaignProvinces.querySelectorAll('input[type="checkbox"]'))checkbox.disabled=campaignRunning;
     els.campaignPause.hidden=!campaignRunning;
     els.campaignResume.hidden=!campaignPaused;
-    els.campaignResume.disabled=campaignPaused&&state.status==="running";
+    els.campaignResume.disabled=!stateReady||(campaignPaused&&state.status==="running");
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
     const unknown=data.filter(r=>!rowLocation(r)).length;
     els.locationHint.textContent=!data.length?"Para filtrar por ciudad se utiliza la dirección pública de cada ficha.":
@@ -216,22 +225,31 @@
        suggest&&!filters.strictLocation?`Objetivo sugerido: ${suggest}. El filtro está desactivado.`:
        "Escribí una ciudad para activar el filtro geográfico; también podés usar las papeleras.");
     message(state.message||"Listo para comenzar.");
-    els.start.disabled=!pageSupported || state.status==="running"||campaignBlockingNormal;
+    els.start.disabled=!stateReady||!pageSupported || state.status==="running"||campaignBlockingNormal;
     els.stop.disabled=state.status!=="running";
-    els.download.disabled=kept.length===0;
+    els.download.disabled=!stateReady||kept.length===0;
     els.limit.disabled=state.status==="running"||campaignBlockingNormal;
     els.country.disabled=state.status==="running"||campaignBlockingNormal;
     els.searchQuery.disabled=state.status==="running"||campaignBlockingNormal;
-    els.searchStart.disabled=state.status==="running" || campaignBlockingNormal || !els.searchQuery.value.trim();
-    els.resume.hidden=!state.searchUrl||Boolean(campaignState.id&&campaignState.id===state.campaignId);
+    els.searchStart.disabled=!stateReady||state.status==="running" || campaignBlockingNormal || !els.searchQuery.value.trim();
+    els.resume.hidden=!stateReady||!state.searchUrl||Boolean(campaignState.id&&campaignState.id===state.campaignId);
     els.resume.textContent=state.status==="running"?"● Comprobar extracción en segundo plano":"↻ Continuar extracción guardada";
     els.start.textContent=state.status==="running"?"● Extracción en curso":
       data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
   }
+  function scheduleRender() {
+    if(renderTimer)return;
+    renderTimer=setTimeout(()=>{renderTimer=0;render();},120);
+  }
   async function readData() {
-    const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY,CAMPAIGN_LOG_KEY]);
+    const config=await chrome.storage.local.get([FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
+    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(config[SETTINGS_KEY]||{})};
+    campaignState=config[CAMPAIGN_KEY]||campaignState;
+    loading=false;
+    render();
+    const stored=await chrome.storage.local.get(STATE_KEY);
     state=normalizeState(stored[STATE_KEY]);
-    filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
+    filters=config[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
     else if(!Array.isArray(filters.includedCategories)) {
       const legacyExcluded=new Set(filters.excludedCategories||[]);
@@ -247,11 +265,15 @@
       filters={...filters,strictLocation:false,locationFilterTouched:false};
       await chrome.storage.local.set({[FILTER_KEY]:filters});
     }
-    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(stored[SETTINGS_KEY]||{})};
-    campaignState=stored[CAMPAIGN_KEY]||campaignState;
-    campaignLogs=Array.isArray(stored[CAMPAIGN_LOG_KEY])?stored[CAMPAIGN_LOG_KEY]:[];
-    loading=false;
+    campaignLogs=[];
+    stateReady=true;
     render();
+    // Historical campaign events can accumulate during nationwide runs.
+    // Load them after the controls are already visible so they don't delay opening.
+    chrome.storage.local.get(CAMPAIGN_LOG_KEY).then(result=>{
+      campaignLogs=Array.isArray(result[CAMPAIGN_LOG_KEY])?result[CAMPAIGN_LOG_KEY]:[];
+      renderLog(allLogs());
+    }).catch(()=>{});
   }
   async function appendUiLog(level,event,details={}) {
     const stored=await chrome.storage.local.get(STATE_KEY);
@@ -338,6 +360,7 @@
     settings.limit=Math.min(100000,v);render();await saveSettings();
   });
   async function startSearchFromPopup() {
+    if(!stateReady)return;
     const query=els.searchQuery.value.trim();
     if(!query) {message("Escribí qué negocio o categoría querés buscar.");return;}
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting"||campaignState.status==="paused") {message("Continuá o reemplazá la campaña pausada antes de iniciar otra búsqueda.");return;}
@@ -368,11 +391,12 @@
   for(const field of [els.campaignQuery,els.campaignCountry,els.campaignProvinces]) {
     field.addEventListener("input",()=>{
       settings.campaignQuery=els.campaignQuery.value;
-      els.campaignStart.disabled=campaignState.status==="running"||campaignState.status==="starting"||state.status==="running"||!settings.campaignQuery.trim();
+      els.campaignStart.disabled=!stateReady||campaignState.status==="running"||campaignState.status==="starting"||state.status==="running"||!settings.campaignQuery.trim();
     });
     field.addEventListener("change",()=>saveCampaignForm().catch(err=>message("Error al guardar la campaña: "+(err.message||String(err)))));
   }
   els.campaignStart.addEventListener("click",async ()=>{
+    if(!stateReady)return;
     const query=els.campaignQuery.value.trim();
     if(!query)return;
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción activa antes de iniciar una campaña.");return;}
@@ -414,12 +438,13 @@
   });
   els.searchQuery.addEventListener("input",()=>{
     settings.searchQuery=els.searchQuery.value;
-    els.searchStart.disabled=state.status==="running" || ["running","starting","paused"].includes(campaignState.status) || !els.searchQuery.value.trim();
+    els.searchStart.disabled=!stateReady||state.status==="running" || ["running","starting","paused"].includes(campaignState.status) || !els.searchQuery.value.trim();
   });
   els.searchQuery.addEventListener("keydown",event=>{
     if(event.key==="Enter") {event.preventDefault();startSearchFromPopup();}
   });
   els.resume.addEventListener("click",async ()=>{
+    if(!stateReady)return;
     els.resume.disabled=true;
     message("Comprobando la pestaña de Maps y el progreso guardado…");
     try {
@@ -445,6 +470,7 @@
     }
   });
   els.start.addEventListener("click",async ()=>{
+    if(!stateReady)return;
     if(!pageSupported)return;
     try {
       let limit=Number.parseInt(els.limit.value,10);
@@ -466,6 +492,7 @@
     catch(err) {await appendUiLog("error","Error al detener extracción",{error:err.message||String(err)});message("Error al detener: "+(err.message||String(err)));}
   });
   els.download.addEventListener("click",async ()=>{
+    if(!stateReady)return;
     try {
       const selected=includedRows();
       if(!selected.length) {message("No hay fichas que cumplan los filtros.");return;}
@@ -473,6 +500,7 @@
     } catch(err) {message("Error al descargar: "+(err.message||String(err)));}
   });
   els.clear.addEventListener("click",async ()=>{
+    if(!stateReady)return;
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción o campaña antes de borrar.");return;}
     if(rows().length&&!confirm("¿Borrar definitivamente las fichas guardadas? La selección de categorías y las exclusiones de ciudades se pueden volver a cambiar; este borrado completo no."))return;
     state=initial();filters=blankFilters("");
@@ -490,7 +518,7 @@
     if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(changes[SETTINGS_KEY].newValue||{})};
     if(changes[CAMPAIGN_KEY])campaignState=changes[CAMPAIGN_KEY].newValue||{status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
     if(changes[CAMPAIGN_LOG_KEY])campaignLogs=Array.isArray(changes[CAMPAIGN_LOG_KEY].newValue)?changes[CAMPAIGN_LOG_KEY].newValue:[];
-    render();
+    scheduleRender();
   });
   Promise.all([currentTab(),readData()]).catch(err=>message("Error de Chrome: "+(err.message||String(err))));
 })();
