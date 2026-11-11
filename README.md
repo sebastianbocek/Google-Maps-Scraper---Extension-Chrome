@@ -25,7 +25,8 @@
 - Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias argentinas y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
-- Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa hasta cinco fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
+- Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
+- Permite configurar desde el panel entre 1 y 20 pestañas de enriquecimiento en segundo plano (5 por defecto), para ajustar el paralelismo al rendimiento del equipo. El valor elegido también se registra en el log de cada búsqueda.
 - Guarda la cola de fichas pendientes junto con los resultados; al continuar, reintenta el enriquecimiento pendiente sin volver a recorrer las fichas ya guardadas.
 - Antes de pasar a la siguiente ciudad, espera la confirmación visible de Google Maps **“No hay más resultados”** y procesa todas las fichas cargadas que aún estén pendientes. Si llega a ocho desplazamientos sin avance, abre fichas recientes, vuelve a la misma posición de la lista y sigue desplazando hacia abajo hasta cargar resultados nuevos o ver el marcador final. No vuelve a recorrer las mismas fichas en bucle; la campaña avanza automáticamente cuando Maps confirma el fin.
 - Permite marcar y desmarcar categorías de negocio con casillas antes de exportar. Todas comienzan desmarcadas; hay acciones para seleccionar todas o ninguna y el contador se actualiza al instante.

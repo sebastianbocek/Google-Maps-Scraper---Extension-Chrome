@@ -3,14 +3,15 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear","selectAllCategories","clearCategorySelection",
+  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","parallelTabs","start","stop","download","clear","selectAllCategories","clearCategorySelection",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign", CAMPAIGN_LOG_KEY="glcsv_campaign_logs";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",includedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
+  const clampParallelTabs=value=>{const n=Number.parseInt(value,10);return Number.isFinite(n)?Math.max(1,Math.min(20,n)):5;};
   let activeTab=null, pageSupported=false, state=initial();
-  let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
+  let filters=blankFilters(""), settings={country:"auto",limit:0,parallelTabs:5,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
   let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]},campaignLogs=[];
   let loading=true,stateReady=false,renderTimer=0;
   const UNKNOWN="__unknown__";
@@ -218,6 +219,8 @@
     els.campaignResume.hidden=!campaignPaused;
     els.campaignResume.disabled=!stateReady||(campaignPaused&&state.status==="running");
     if(document.activeElement!==els.limit) els.limit.value=String(settings.limit??0);
+    if(document.activeElement!==els.parallelTabs) els.parallelTabs.value=String(settings.parallelTabs??5);
+    els.parallelTabs.disabled=state.status==="running"||campaignRunning;
     const unknown=data.filter(r=>!rowLocation(r)).length;
     els.locationHint.textContent=!data.length?"Para filtrar por ciudad se utiliza la dirección pública de cada ficha.":
       (unknown?`${unknown} ficha(s) sin ciudad identificable. `:"")+
@@ -243,7 +246,8 @@
   }
   async function readData() {
     const config=await chrome.storage.local.get([FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
-    settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(config[SETTINGS_KEY]||{})};
+    settings={country:"auto",limit:0,parallelTabs:5,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(config[SETTINGS_KEY]||{})};
+    settings.parallelTabs=clampParallelTabs(settings.parallelTabs);
     campaignState=config[CAMPAIGN_KEY]||campaignState;
     loading=false;
     render();
@@ -359,6 +363,13 @@
     if(!Number.isFinite(v)||v<0)v=0;
     settings.limit=Math.min(100000,v);render();await saveSettings();
   });
+  els.parallelTabs.addEventListener("change",async ()=>{
+    const value=Number.parseInt(els.parallelTabs.value,10);
+    settings.parallelTabs=clampParallelTabs(value);
+    els.parallelTabs.value=String(settings.parallelTabs);
+    await saveSettings();
+    message(`Las búsquedas nuevas usarán ${settings.parallelTabs} pestañas de enriquecimiento.`);
+  });
   async function startSearchFromPopup() {
     if(!stateReady)return;
     const query=els.searchQuery.value.trim();
@@ -378,7 +389,7 @@
     els.searchStart.disabled=true;
     message(`Abriendo Google Maps para “${query}” e iniciando la extracción…`);
     try {
-      const result=await chrome.runtime.sendMessage({type:"GLCSV_SEARCH_AND_START",query,limit:settings.limit,country:settings.country||"auto"});
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_SEARCH_AND_START",query,limit:settings.limit,country:settings.country||"auto",parallelTabs:settings.parallelTabs});
       if(!result?.ok)throw new Error(result?.error||"No se pudo abrir la búsqueda.");
       message("Búsqueda abierta. La extracción ya está en marcha en la nueva pestaña.");
       await readData();
@@ -413,7 +424,7 @@
     await saveSettings();
     els.campaignStart.disabled=true;
     try {
-      const result=await chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_START",business:query,country:els.campaignCountry.value,queries,limit:settings.limit,phoneCountry:settings.country||"auto"});
+      const result=await chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_START",business:query,country:els.campaignCountry.value,queries,limit:settings.limit,phoneCountry:settings.country||"auto",parallelTabs:settings.parallelTabs});
       if(!result?.ok)throw new Error(result?.error||"No se pudo iniciar la campaña.");
       await readData();
     } catch(err) {message("Error al iniciar la campaña: "+(err.message||String(err)));}
@@ -482,7 +493,7 @@
         !confirm("Hay resultados de otra búsqueda. Descargar el CSV antes: iniciar esta búsqueda reemplazará los datos guardados. ¿Continuar?"))return;
       if(filters.searchKey!==key) {filters=blankFilters(key);await saveFilters();}
       els.start.disabled=true;
-      const result=await send("GLCSV_START",{limit:settings.limit,country:settings.country,searchUrl:activeTab.url,tabId:activeTab.id});
+      const result=await send("GLCSV_START",{limit:settings.limit,country:settings.country,parallelTabs:settings.parallelTabs,searchUrl:activeTab.url,tabId:activeTab.id});
       if(!result?.ok)throw new Error(result?.error||"Google no aceptó el inicio.");
       await readData();
     } catch(err){await appendUiLog("error","Error al iniciar en esta pestaña",{error:err.message||String(err)});render();message("Error: "+(err.message||String(err)));}
@@ -515,7 +526,7 @@
       if(filters.searchKey!==state.searchKey)filters=blankFilters(state.searchKey);
     }
     if(changes[FILTER_KEY])filters=changes[FILTER_KEY].newValue||blankFilters(state.searchKey);
-    if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(changes[SETTINGS_KEY].newValue||{})};
+    if(changes[SETTINGS_KEY]){settings={country:"auto",limit:0,parallelTabs:5,whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(changes[SETTINGS_KEY].newValue||{})};settings.parallelTabs=clampParallelTabs(settings.parallelTabs);}
     if(changes[CAMPAIGN_KEY])campaignState=changes[CAMPAIGN_KEY].newValue||{status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
     if(changes[CAMPAIGN_LOG_KEY])campaignLogs=Array.isArray(changes[CAMPAIGN_LOG_KEY].newValue)?changes[CAMPAIGN_LOG_KEY].newValue:[];
     scheduleRender();

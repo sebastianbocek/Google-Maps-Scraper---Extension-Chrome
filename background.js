@@ -132,6 +132,7 @@ async function openMapsSearchAndStart(message) {
     type:'GLCSV_START',
     limit:message.limit,
     country:message.country||'auto',
+    parallelTabs:message.parallelTabs??5,
     searchUrl:loadedTab.url||url,
     tabId:tab.id
   });
@@ -184,6 +185,7 @@ async function launchCampaignQuery(campaign) {
   if(!beforeStart||beforeStart.id!==current.id||beforeStart.status==='paused')return {ok:true,paused:true,tabId:tab.id};
   const result=await chrome.tabs.sendMessage(tab.id,{
     type:'GLCSV_START',limit:beforeStart.limit,country:beforeStart.phoneCountry||'auto',
+    parallelTabs:beforeStart.parallelTabs??5,
     searchUrl:(await chrome.tabs.get(tab.id)).url||url,tabId:tab.id,campaignId:beforeStart.id,campaignQuery:item.query
   });
   if(!result?.ok)throw new Error(result?.error||`No se pudo iniciar la búsqueda de ${item.label}.`);
@@ -201,7 +203,8 @@ async function startCampaign(message) {
   if(!business)throw new Error('Escribí un rubro o negocio para la campaña.');
   if(!queries.length)throw new Error('Elegí al menos una provincia o una búsqueda nacional.');
   const id=`campaign-${Date.now()}-${Math.random().toString(36).slice(2,9)}`;
-  const campaign={id,business,country:message.country||'AR',queries,index:0,status:'starting',message:`Preparando ${queries[0].label} (1 de ${queries.length})…`,limit:Number(message.limit)||0,phoneCountry:message.phoneCountry||'auto',tabId:null,createdAt:Date.now(),updatedAt:Date.now()};
+  const requestedParallelTabs=Number.parseInt(message.parallelTabs,10);
+  const campaign={id,business,country:message.country||'AR',queries,index:0,status:'starting',message:`Preparando ${queries[0].label} (1 de ${queries.length})…`,limit:Number(message.limit)||0,phoneCountry:message.phoneCountry||'auto',parallelTabs:Number.isFinite(requestedParallelTabs)?Math.max(1,Math.min(20,requestedParallelTabs)):5,tabId:null,createdAt:Date.now(),updatedAt:Date.now()};
   await chrome.storage.local.set({[CAMPAIGN_KEY]:campaign});
   try {return await launchCampaignQuery(campaign);}
   catch(error) {
@@ -281,7 +284,9 @@ async function pauseCampaign() {
 async function continueCampaign() {
   const campaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
   if(!campaign||campaign.status!=='paused')throw new Error('No hay una campaña pausada para continuar.');
-  const next={...campaign,status:'starting',message:`Continuando ${campaign.queries[campaign.index]?.label||'la búsqueda actual'}…`,updatedAt:Date.now()};
+  const {glcsv_settings:settings={}}=await chrome.storage.local.get('glcsv_settings');
+  const requestedParallelTabs=Number.parseInt(settings.parallelTabs,10);
+  const next={...campaign,parallelTabs:Number.isFinite(requestedParallelTabs)?Math.max(1,Math.min(20,requestedParallelTabs)):campaign.parallelTabs??5,status:'starting',message:`Continuando ${campaign.queries[campaign.index]?.label||'la búsqueda actual'}…`,updatedAt:Date.now()};
   await chrome.storage.local.set({[CAMPAIGN_KEY]:next});
   try {return await launchCampaignQuery(next);}
   catch(error) {
@@ -321,6 +326,7 @@ async function continueSavedSearch() {
     type:'GLCSV_START',
     limit:settings.limit??0,
     country:settings.country||'auto',
+    parallelTabs:settings.parallelTabs??5,
     searchUrl:state.searchUrl,
     tabId:tab.id
   });

@@ -615,7 +615,7 @@
     logs.push({time:new Date().toISOString(),level,event,details});
     state.logs=logs.slice(-MAX_LOG_ENTRIES);
   }
-  async function scan({limit,searchUrl,tabId,country,campaignId,campaignQuery}) {
+  async function scan({limit,searchUrl,tabId,country,campaignId,campaignQuery,detailConcurrency=5}) {
     let existing=(await chrome.storage.local.get(STATE_KEY))[STATE_KEY] || {};
     const key=sourceKey(searchUrl);
     const canResume=existing.searchKey===key && Array.isArray(existing.rows);
@@ -637,7 +637,7 @@
       if(row?.businessUrl)pendingDetails.set(row.businessUrl,row);
     const detailQueue=[];
     const activeDetailTasks=new Set();
-    const DETAIL_CONCURRENCY=5, MAX_DETAIL_BACKLOG=15;
+    const DETAIL_CONCURRENCY=within(Math.round(Number(detailConcurrency)||5),1,20), MAX_DETAIL_BACKLOG=Math.max(15,DETAIL_CONCURRENCY*3);
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
     const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
@@ -681,7 +681,7 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
@@ -853,7 +853,7 @@
       const parsedLimit=Number(message.limit);
       const limit=Number.isInteger(parsedLimit) && parsedLimit>=0 ? within(parsedLimit,0,100000) : 0;
       currentRun=scan({limit,searchUrl:message.searchUrl || location.href,tabId:message.tabId,
-        country:message.country || "auto",campaignId:message.campaignId||"",campaignQuery:message.campaignQuery||""})
+        country:message.country || "auto",detailConcurrency:message.parallelTabs||5,campaignId:message.campaignId||"",campaignQuery:message.campaignQuery||""})
         .catch(async err=>{
           // scan() also performs storage reads before its internal try/finally.
           // Consume failures there (including a context invalidated by reload)

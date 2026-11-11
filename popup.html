@@ -57,6 +57,11 @@
       <input id="limit" type="number" min="0" max="100000" step="1" value="0" />
       <p><strong>0 = sin límite fijo.</strong> Si Maps deja de cargar resultados, la extracción se pausa y podés continuar desde el progreso guardado.</p>
     </div>
+    <div class="options">
+      <label for="parallelTabs">Pestañas de enriquecimiento (1–20)</label>
+      <input id="parallelTabs" type="number" min="1" max="20" step="1" value="5" />
+      <p>Abre fichas en segundo plano para completar sus datos. El valor se aplica a búsquedas nuevas y al continuar una campaña pausada.</p>
+    </div>
     <button id="start" class="primary">▶ Iniciar en esta pestaña</button>
     <div class="two">
       <button id="stop" disabled>■ Detener extracción</button>
