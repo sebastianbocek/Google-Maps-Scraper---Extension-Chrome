@@ -529,15 +529,51 @@
     return [...document.querySelectorAll('h1,h2,[role="heading"],.DUwDvf')]
       .some(el=>rect(el).width>0&&canonical(safeText(el))===target);
   }
-  async function restoreSearchAfterRecovery(previousUrl) {
-    if(!/\/maps\/place\//i.test(location.pathname)||location.href===previousUrl)return true;
-    history.back();
+  function captureResultsPosition() {
+    const scroller=getScrollTarget(selectCards());
+    return {top:scroller?scroller.scrollTop:window.scrollY,scroller:Boolean(scroller)};
+  }
+  function restoreResultsPosition(position) {
+    const cards=selectCards(),scroller=getScrollTarget(cards);
+    if(scroller) {
+      const top=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
+      scroller.scrollTop=top;
+      scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
+      return {restored:true,top:scroller.scrollTop,method:"container"};
+    }
+    window.scrollTo({top:Number(position?.top)||0,behavior:"instant"});
+    return {restored:Boolean(cards.length),top:window.scrollY,method:"window"};
+  }
+  function clickMapsBackControl() {
+    const candidates=[...document.querySelectorAll('button,[role="button"]')].filter(el=>{
+      if(el.closest("#glcsv-float"))return false;
+      const r=rect(el),label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""}`);
+      return r.width>0&&r.height>0&&r.top<180&&r.left<innerWidth*.62&&/(back|volver|atras|cerrar|close)/.test(label);
+    }).sort((a,b)=>{
+      const rank=el=>/(back|volver|atras)/.test(canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""}`))?0:1;
+      return rank(a)-rank(b)||rect(a).top-rect(b).top;
+    });
+    if(!candidates.length)return false;
+    candidates[0].click();
+    return true;
+  }
+  async function restoreSearchAfterRecovery(previousUrl,position) {
     const started=Date.now();
-    while(Date.now()-started<7000) {
-      if(!/\/maps\/place\//i.test(location.pathname)&&selectCards().length)return true;
+    let backControlClicked=false;
+    if(/\/maps\/place\//i.test(location.pathname))history.back();
+    while(Date.now()-started<9000&&!stopped) {
+      if(!/\/maps\/place\//i.test(location.pathname)&&selectCards().length) {
+        // Maps can return to its list at scrollTop=0 after history.back().
+        // Restore the pre-click position before searching farther down.
+        const first=restoreResultsPosition(position);
+        await wait(260);
+        const second=restoreResultsPosition(position);
+        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
+      }
+      if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
       await wait(180);
     }
-    return false;
+    return {ok:false,url:location.href};
   }
   async function recoverStalledResults(recoveryTried,inspected) {
     const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
@@ -551,21 +587,24 @@
       recoveryTried.add(card.key);
       attemptedNames.push(card.name);
       const previousUrl=location.href;
+      const previousPosition=captureResultsPosition();
       if(!clickCard(card))continue;
       const started=Date.now();
-      let opened=false;
+      let opened=false,openedBy="";
       while(Date.now()-started<2600&&!stopped) {
         if(hasNoMoreResults()) {
           const fresh=selectCards().filter(item=>!inspected.has(item.key));
           return {recovered:false,endReached:fresh.length===0,newResults:fresh.length>0,card:card.name,attemptedNames};
         }
-        if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;break;}
+        const routeOpened=location.href!==previousUrl&&/\/maps\/place\//i.test(location.pathname);
+        if(routeOpened){opened=true;openedBy="place-url";break;}
+        if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;openedBy="business-title";break;}
         await wait(160);
       }
       if(!opened)continue;
-      const restored=await restoreSearchAfterRecovery(previousUrl);
-      if(restored)return {recovered:true,card:card.name,attempted:recoveryTried.size,attemptedNames};
-      return {recovered:false,card:card.name,restoreFailed:true,attempted:recoveryTried.size,attemptedNames};
+      const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition);
+      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal};
+      return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url};
     }
     return {recovered:false,attempted:recoveryTried.size,attemptedNames};
   }
@@ -725,17 +764,25 @@
             recovery=await recoverStalledResults(recoveryTried,inspected);
             if(recovery.endReached){endReached=true;break;}
             if(recovery.newResults){hasNew=true;noProgress=0;break;}
+            if(recovery.restoreFailed) {
+              logEvent(state,"error","No se pudo volver a la lista tras abrir una ficha; se detiene la recuperación para evitar repetir tarjetas",{name:recovery.card,openedBy:recovery.openedBy,urlAfter:recovery.urlAfter,attemptedCards:recovery.attemptedNames});
+              throw new Error(`Se abrió «${recovery.card}», pero Maps no regresó a la lista de resultados.`);
+            }
             if(recovery.recovered) {
-              logEvent(state,"warn","Se abrió una ficha previa; desplazando hasta que aparezcan resultados nuevos",{name:recovery.card,attemptedCards:recovery.attemptedNames});
+              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal});
               recoveryScroll=await scrollUntilNewResults(inspected);
               hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
               endReached=Boolean(recoveryScroll.endReached&&!hasNew);
               if(endReached||hasNew){noProgress=0;break;}
             }
             if(!recovery.attemptedNames?.length) {
-              // We tried all currently loaded cards. Start another recovery
-              // cycle in the same city instead of advancing on a missing marker.
-              recoveryTried.clear();
+              // Do not clear recoveryTried: that would send the recovery loop
+              // back to the first cards forever. Keep moving down the feed
+              // until Maps adds cards or shows its real end marker.
+              recoveryScroll=await scrollUntilNewResults(inspected,20);
+              hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
+              endReached=Boolean(recoveryScroll.endReached&&!hasNew);
+              if(endReached||hasNew){noProgress=0;break;}
               await wait(900);
             }
             noProgress=MAX_NO_PROGRESS;
