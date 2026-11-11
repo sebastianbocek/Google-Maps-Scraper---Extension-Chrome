@@ -161,8 +161,22 @@ async function launchCampaignQuery(campaign) {
     try {tab=await chrome.tabs.get(current.tabId);} catch {}
   }
   if(tab) {
-    const keepCurrentMapsState=resumeSameQuery&&supportedSearchUrl(tab.url||'');
     const sameSearch=searchSourceKey(tab.url||'')===searchSourceKey(url);
+    let visibleMapsQuery='';
+    if(resumeSameQuery&&supportedSearchUrl(tab.url||'')) {
+      try {
+        const [result]=await chrome.scripting.executeScript({target:{tabId:tab.id},func:()=>document.querySelector('input#searchboxinput,input[role="combobox"]')?.value||''});
+        visibleMapsQuery=String(result?.result||'').trim();
+      } catch {}
+    }
+    const normalizeQuery=value=>String(value||'').trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+    const placePage=/\/maps\/place\//i.test(new URL(tab.url||url).pathname);
+    const keepCurrentMapsState=resumeSameQuery&&supportedSearchUrl(tab.url||'')&&
+      (sameSearch||(placePage&&normalizeQuery(visibleMapsQuery)===normalizeQuery(item.query)));
+    if(resumeSameQuery&&supportedSearchUrl(tab.url||'')&&!sameSearch&&!keepCurrentMapsState)
+      await appendBackgroundLog('warn','La pestaña tenía otra búsqueda; restaurando la consulta de la campaña',{
+        campaignId:current.id,location:item.label,expectedQuery:item.query,visibleMapsQuery,url:tab.url
+      });
     await chrome.tabs.update(tab.id,{...((sameSearch||keepCurrentMapsState)?{}:{url}),active:false});
     if(keepCurrentMapsState) {
       await appendBackgroundLog('info','Reanudando campaña en la pestaña y posición guardadas',{

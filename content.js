@@ -371,11 +371,19 @@
       businessUrl:baseRow.businessUrl||location.href
     };
   }
-  function clickCard(card) {
+  function clickCard(card,{requireMapsPlace=false}={}) {
     const root = card.element;
     if (!root?.isConnected) return false;
     try {
-      let target = root.querySelector(".dbg0pd, .fontHeadlineSmall, .qBF1Pd, a.hfpxzc") || root;
+      const placeLink=[...root.querySelectorAll('a.hfpxzc,a[href*="/maps/place/"]')].find(anchor=>{
+        try {
+          const url=new URL(unwrapUrl(anchor.getAttribute("href")||""));
+          return /(^|\.)google\.[a-z.]+$/i.test(url.hostname)&&url.pathname.startsWith("/maps/place/");
+        } catch {return false;}
+      });
+      if(requireMapsPlace&&!placeLink)return false;
+      let target = placeLink || root.querySelector(".dbg0pd, .fontHeadlineSmall, .qBF1Pd") || (!requireMapsPlace?root:null);
+      if(!target)return false;
       if (target.closest("#glcsv-float")) return false;
       target.scrollIntoView({behavior:"instant",block:"nearest",inline:"nearest"});
       target.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,cancelable:true,view:window}));
@@ -547,6 +555,34 @@
     const scroller=getScrollTarget(selectCards());
     return {top:scroller?scroller.scrollTop:window.scrollY,scroller:Boolean(scroller)};
   }
+  function mapsSearchInput() {
+    return [...document.querySelectorAll('input#searchboxinput,input[role="combobox"]')]
+      .find(input=>rect(input).width>0&&rect(input).height>0)||null;
+  }
+  function mapsSearchValue() {return plain(mapsSearchInput()?.value||"");}
+  async function submitMapsSearch(query,timeout=16000) {
+    if(!/\/maps(?:\/|$)/i.test(location.pathname))return {ok:false,reason:"not-on-maps",url:location.href};
+    const input=mapsSearchInput(),desired=plain(query);
+    if(!input||!desired)return {ok:false,reason:input?"empty-query":"search-box-not-found",actual:mapsSearchValue()};
+    const before=mapsSearchValue();
+    try {
+      input.focus();
+      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
+      if(setter)setter.call(input,desired);else input.value=desired;
+      input.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertText",data:desired}));
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+      input.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true}));
+      input.dispatchEvent(new KeyboardEvent("keyup",{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true}));
+    } catch(error) {return {ok:false,reason:String(error?.message||error),before,actual:mapsSearchValue()};}
+    const started=Date.now();
+    while(Date.now()-started<timeout&&!stopped) {
+      const cards=selectCards();
+      const routeMatches=canonical(utils.fromSearch(location.href))===canonical(desired);
+      if(routeMatches&&(cards.length||hasNoMoreResults()))return {ok:true,before,actual:mapsSearchValue(),cards:cards.length,endReached:hasNoMoreResults(),routeMatches,url:location.href};
+      await wait(250);
+    }
+    return {ok:false,before,actual:mapsSearchValue(),cards:selectCards().length,endReached:hasNoMoreResults(),routeMatches:canonical(utils.fromSearch(location.href))===canonical(desired),url:location.href};
+  }
   function restoreResultsPosition(position) {
     const cards=selectCards(),scroller=getScrollTarget(cards);
     if(scroller) {
@@ -571,12 +607,18 @@
     candidates[0].click();
     return true;
   }
-  async function restoreSearchAfterRecovery(previousUrl,position) {
+  async function restoreSearchAfterRecovery(previousUrl,position,expectedQuery) {
     const started=Date.now();
     let backControlClicked=false;
     if(/\/maps\/place\//i.test(location.pathname))history.back();
     while(Date.now()-started<9000&&!stopped) {
       if(!/\/maps\/place\//i.test(location.pathname)&&selectCards().length) {
+        const actualQuery=mapsSearchValue();
+        if(expectedQuery&&canonical(actualQuery)!==canonical(expectedQuery)) {
+          const searchResult=await submitMapsSearch(expectedQuery);
+          if(!searchResult.ok)return {ok:false,url:location.href,queryMismatch:true,actualQuery,expectedQuery,searchResult};
+          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true};
+        }
         // Maps can return to its list at scrollTop=0 after history.back().
         // Restore the pre-click position before searching farther down.
         const first=restoreResultsPosition(position);
@@ -589,10 +631,10 @@
     }
     return {ok:false,url:location.href};
   }
-  async function recoverStalledResults(recoveryTried,inspected) {
+  async function recoverStalledResults(recoveryTried,inspected,expectedQuery) {
     const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
     if(hasNoMoreResults())return {recovered:false,endReached:initiallyFresh.length===0,newResults:initiallyFresh.length>0,attempted:recoveryTried.size};
-    const candidates=selectCards().filter(card=>inspected.has(card.key)).reverse();
+    const candidates=selectCards().filter(card=>inspected.has(card.key)&&card.businessUrl).reverse();
     const attemptedNames=[];
     for(const card of candidates) {
       if(attemptedNames.length>=12)break;
@@ -602,7 +644,7 @@
       attemptedNames.push(card.name);
       const previousUrl=location.href;
       const previousPosition=captureResultsPosition();
-      if(!clickCard(card))continue;
+      if(!clickCard(card,{requireMapsPlace:true}))continue;
       const started=Date.now();
       let opened=false,openedBy="";
       while(Date.now()-started<2600&&!stopped) {
@@ -616,9 +658,9 @@
         await wait(160);
       }
       if(!opened)continue;
-      const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition);
-      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal};
-      return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url};
+      const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition,expectedQuery);
+      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored)};
+      return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url,queryMismatch:restored.queryMismatch,expectedQuery,actualQuery:restored.actualQuery};
     }
     return {recovered:false,attempted:recoveryTried.size,attemptedNames};
   }
@@ -701,6 +743,8 @@
     let noProgress=0;
     let iterations=0;
     let endReached=false;
+    let emptyFeedRecoveryAttempts=0;
+    const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
     const recoveryTried=new Set();
     let finishReason="error";
     try {
@@ -710,6 +754,7 @@
       while (!stopped && !endReached && (limit===0 || queryProcessed < limit)) {
         iterations++;
         const cards=selectCards();
+        if(cards.length)emptyFeedRecoveryAttempts=0;
         const pending=cards.filter(c=>!inspected.has(c.key));
         if(hasNoMoreResults()&&!pending.length){endReached=true;break;}
         let count=0;
@@ -796,7 +841,7 @@
             recoveryCycles++;
             state.message=`Maps sigue cargando en esta ciudad. Probando fichas recientes (${recoveryCycles})…`;
             showOverlay(state.message);
-            recovery=await recoverStalledResults(recoveryTried,inspected);
+            recovery=await recoverStalledResults(recoveryTried,inspected,expectedQuery);
             if(recovery.endReached){endReached=true;break;}
             if(recovery.newResults){hasNew=true;noProgress=0;break;}
             if(recovery.restoreFailed) {
@@ -811,6 +856,27 @@
               if(endReached||hasNew){noProgress=0;break;}
             }
             if(!recovery.attemptedNames?.length) {
+              if(!selectCards().length) {
+                emptyFeedRecoveryAttempts++;
+                const actualQuery=mapsSearchValue();
+                const restoredSearch=await submitMapsSearch(expectedQuery);
+                const refreshed=selectCards();
+                hasNew=refreshed.some(c=>!inspected.has(c.key));
+                endReached=Boolean(restoredSearch.endReached&&!hasNew);
+                logEvent(state,restoredSearch.ok?"info":"warn",restoredSearch.ok?
+                  "Vista sin tarjetas: se restauró la búsqueda activa de Maps":
+                  "Vista sin tarjetas: se intentó restaurar la búsqueda activa",{
+                    expectedQuery,actualQuery,emptyFeedRecoveryAttempts,restoredSearch,
+                    refreshedCards:refreshed.length,hasUnseenCard:hasNew,endReached
+                  });
+                if(endReached||hasNew||refreshed.length) {noProgress=0;break;}
+                if(emptyFeedRecoveryAttempts>=2)
+                  throw new Error(`Maps no volvió a mostrar resultados para «${expectedQuery}». La consulta quedó guardada; reanudá la campaña para reintentar.`);
+                await wait(900);
+                noProgress=MAX_NO_PROGRESS;
+                await scheduleCheckpoint(true);
+                continue;
+              }
               // Do not clear recoveryTried: that would send the recovery loop
               // back to the first cards forever. Keep moving down the feed
               // until Maps adds cards or shows its real end marker.
