@@ -642,7 +642,7 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
@@ -772,7 +772,7 @@
         stalledWithoutEnd?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda aquí; no se iniciará otra ciudad.`:
         endReached?`Finalizado: Maps confirmó que no hay más resultados. ${rows.size} fichas detectadas; CSV disponible.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
-      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,stalledWithoutEnd,rows:rows.size});
+      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,endMarkerConfirmed:endReached,campaignQuery:campaignQuery||undefined,stalledWithoutEnd,rows:rows.size});
     } catch(err) {
       await settleActiveDetails().catch(()=>{});
       state.status="error";
@@ -792,7 +792,7 @@
       running=false;
       currentRun=null;
       stopped=false;
-      if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,rows:rows.size}).catch(()=>{});
+      if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {

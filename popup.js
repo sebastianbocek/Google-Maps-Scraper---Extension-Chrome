@@ -6,12 +6,12 @@
   const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","start","stop","download","clear","selectAllCategories","clearCategorySelection",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
-  const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign";
+  const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign", CAMPAIGN_LOG_KEY="glcsv_campaign_logs";
   const initial=()=>({rows:[], logs:[], status:"idle", message:"Listo para comenzar.", searchUrl:"",searchKey:""});
   const blankFilters=key=>({searchKey:key||"",includedCategories:[],excludedLocations:[],targetLocation:"",targetTouched:false,strictLocation:false,locationFilterTouched:false,websiteMode:"all",phoneMode:"all"});
   let activeTab=null, pageSupported=false, state=initial();
   let filters=blankFilters(""), settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[]};
-  let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
+  let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]},campaignLogs=[];
   let loading=true;
   const UNKNOWN="__unknown__";
   for(const province of Object.keys(globalThis.GLCSVLocations||{})) {
@@ -108,10 +108,18 @@
     const details=entry.details&&Object.keys(entry.details).length?` ${JSON.stringify(entry.details)}`:"";
     return `[${time}] [${level}] ${entry.event||"Evento"}${details}`;
   }
+  function allLogs() {
+    const unique=new Map();
+    for(const entry of [...(state.logs||[]),...campaignLogs]) {
+      const key=`${entry.time||""}|${entry.event||""}|${entry.details?.campaignId||""}`;
+      unique.set(key,entry);
+    }
+    return [...unique.values()].sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")));
+  }
   function renderLog(entries) {
     const logs=Array.isArray(entries)?entries:[];
     els.logCount.textContent=`${logs.length} evento${logs.length===1?"":"s"}`;
-    els.logOutput.value=logs.slice(-40).map(formatLog).join("\n")||"Todavía no hay eventos registrados.";
+    els.logOutput.value=logs.slice(-80).map(formatLog).join("\n")||"Todavía no hay eventos registrados.";
     els.logOutput.scrollTop=els.logOutput.scrollHeight;
   }
   const trash='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 4v7m4-7v7"/></svg>';
@@ -158,7 +166,7 @@
   function render() {
     if(loading) return;
     const data=rows(), kept=includedRows();
-    renderLog(state.logs);
+    renderLog(allLogs());
     els.total.textContent=String(data.length);
     els.phoneCount.textContent=String(data.filter(r=>r.phone).length);
     els.webCount.textContent=String(data.filter(hasRealWebsite).length);
@@ -221,7 +229,7 @@
       data.length && state.searchKey===sourceKey(activeTab?.url||"")?"▶ Continuar en esta pestaña":"▶ Iniciar en esta pestaña";
   }
   async function readData() {
-    const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
+    const stored=await chrome.storage.local.get([STATE_KEY,FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY,CAMPAIGN_LOG_KEY]);
     state=normalizeState(stored[STATE_KEY]);
     filters=stored[FILTER_KEY]||blankFilters(state.searchKey);
     if(filters.searchKey!==state.searchKey) filters=blankFilters(state.searchKey);
@@ -241,6 +249,7 @@
     }
     settings={country:"auto",limit:0,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(stored[SETTINGS_KEY]||{})};
     campaignState=stored[CAMPAIGN_KEY]||campaignState;
+    campaignLogs=Array.isArray(stored[CAMPAIGN_LOG_KEY])?stored[CAMPAIGN_LOG_KEY]:[];
     loading=false;
     render();
   }
@@ -423,7 +432,7 @@
     finally {els.resume.disabled=false;}
   });
   els.copyLog.addEventListener("click",async ()=>{
-    const text=(Array.isArray(state.logs)?state.logs:[]).map(formatLog).join("\n")||"Sin eventos registrados.";
+    const text=allLogs().map(formatLog).join("\n")||"Sin eventos registrados.";
     els.logPanel.open=true;
     try {
       await navigator.clipboard.writeText(text);
@@ -480,6 +489,7 @@
     if(changes[FILTER_KEY])filters=changes[FILTER_KEY].newValue||blankFilters(state.searchKey);
     if(changes[SETTINGS_KEY])settings={country:"auto",limit:0,whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(changes[SETTINGS_KEY].newValue||{})};
     if(changes[CAMPAIGN_KEY])campaignState=changes[CAMPAIGN_KEY].newValue||{status:"idle",message:"Sin campaña activa.",index:0,queries:[]};
+    if(changes[CAMPAIGN_LOG_KEY])campaignLogs=Array.isArray(changes[CAMPAIGN_LOG_KEY].newValue)?changes[CAMPAIGN_LOG_KEY].newValue:[];
     render();
   });
   Promise.all([currentTab(),readData()]).catch(err=>message("Error de Chrome: "+(err.message||String(err))));

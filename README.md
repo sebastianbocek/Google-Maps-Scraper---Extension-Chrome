@@ -31,7 +31,7 @@
 - Permite marcar y desmarcar categorías de negocio con casillas antes de exportar. Todas comienzan desmarcadas; hay acciones para seleccionar todas o ninguna y el contador se actualiza al instante.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
-- Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas.
+- Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas. En campañas conserva un historial separado de inicios, cierres y cambios de ciudad; cada avance automático incluye origen, destino y confirmación de **“No hay más resultados”**. El background bloquea el cambio si el escaneo no confirma explícitamente ese marcador.
 - Limpia la exportación antes de descargar: selecciona categorías, excluye ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.
 - Permite añadir un mensaje opcional prellenado en cada enlace de WhatsApp del CSV; si el campo queda vacío, crea el enlace habitual sin texto.

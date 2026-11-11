@@ -2,6 +2,7 @@
 'use strict';
 importScripts('data_utils.js');
 const CAMPAIGN_KEY='glcsv_campaign';
+const CAMPAIGN_LOG_KEY='glcsv_campaign_logs';
 
 async function pauseInterruptedWork(reason) {
   const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
@@ -31,12 +32,20 @@ chrome.runtime.onInstalled.addListener(details=>{
 chrome.runtime.onStartup.addListener(()=>pauseInterruptedWork('browser_startup').catch(()=>{}));
 
 async function appendBackgroundLog(level,event,details={}) {
-  const {glcsv_state:state={}}=await chrome.storage.local.get('glcsv_state');
+  const stored=await chrome.storage.local.get(['glcsv_state',CAMPAIGN_LOG_KEY]);
+  const state=stored.glcsv_state||{};
+  const entry={time:new Date().toISOString(),level,event,details,...(details.campaignId?{campaignEvent:true}:{})};
   const logs=Array.isArray(state.logs)?state.logs:[];
-  logs.push({time:new Date().toISOString(),level,event,details});
+  logs.push(entry);
   state.logs=logs.slice(-200);
   state.updatedAt=Date.now();
-  await chrome.storage.local.set({glcsv_state:state});
+  const updates={glcsv_state:state};
+  if(details.campaignId) {
+    const campaignLogs=Array.isArray(stored[CAMPAIGN_LOG_KEY])?stored[CAMPAIGN_LOG_KEY]:[];
+    campaignLogs.push(entry);
+    updates[CAMPAIGN_LOG_KEY]=campaignLogs.slice(-5000);
+  }
+  await chrome.storage.local.set(updates);
 }
 
 function searchSourceKey(url) {
@@ -135,6 +144,10 @@ async function launchCampaignQuery(campaign) {
   if(!current||current.id!==campaign.id||current.status==='paused')return {ok:true,paused:true};
   const item=current.queries[current.index];
   if(!item)throw new Error('No quedan ubicaciones en la campaña.');
+  await appendBackgroundLog('info','Iniciando búsqueda de ciudad',{
+    campaignId:current.id,index:current.index+1,total:current.queries.length,
+    location:item.label,query:item.query
+  });
   const url=`https://www.google.com/maps/search/${encodeURIComponent(item.query)}`;
   const {glcsv_state:savedState={}}=await chrome.storage.local.get('glcsv_state');
   // Al abrir una ficha, Maps cambia /maps/search/ por /maps/place/ aunque la
@@ -207,13 +220,43 @@ async function finishCampaignQuery(message) {
     const label=campaign.queries[campaign.index]?.label||'la ubicación actual';
     const text=message.reason==='manual'?`Campaña pausada en ${label}. Podés continuar desde ahí.`:`La búsqueda de ${label} tuvo un error. La campaña quedó pausada y se puede continuar.`;
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status,message:text,updatedAt:Date.now()}});
+    await appendBackgroundLog(message.reason==='error'?'error':'warn',message.reason==='error'?'Ciudad pausada por error':'Ciudad pausada manualmente',{
+      campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
+      location:label,reason:message.reason,rows:message.rows||0,endMarkerConfirmed:Boolean(message.endMarkerConfirmed)
+    });
     return {ok:true,paused:true};
   }
+  const currentItem=campaign.queries[campaign.index];
+  const currentLabel=currentItem?.label||'ubicación actual';
+  if(!message.endMarkerConfirmed||!['complete','limit'].includes(message.reason)) {
+    const text=`La búsqueda de ${currentLabel} no confirmó “No hay más resultados”; no se avanzó a otra ciudad. Podés continuar desde aquí.`;
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:text,updatedAt:Date.now()}});
+    await appendBackgroundLog('error','Avance de ciudad bloqueado: falta confirmar el marcador de fin',{
+      campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
+      location:currentLabel,reason:message.reason,rows:message.rows||0,
+      endMarkerConfirmed:Boolean(message.endMarkerConfirmed)
+    });
+    return {ok:true,paused:true,blocked:true};
+  }
+  await appendBackgroundLog('info','Ciudad completada: Google Maps confirmó el fin de resultados',{
+    campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
+    location:currentLabel,query:currentItem?.query,reason:message.reason,
+    endMarkerConfirmed:true,rows:message.rows||0
+  });
   const nextIndex=campaign.index+1;
   if(nextIndex>=campaign.queries.length) {
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'complete',index:campaign.index,message:`Campaña completa: ${campaign.queries.length} ubicaciones procesadas.`,updatedAt:Date.now()}});
+    await appendBackgroundLog('info','Campaña completa: todas las ciudades terminaron con marcador confirmado',{
+      campaignId:campaign.id,total:campaign.queries.length,finalLocation:currentLabel
+    });
     return {ok:true,complete:true};
   }
+  const nextItem=campaign.queries[nextIndex];
+  await appendBackgroundLog('info','Avance automático a la siguiente ciudad',{
+    campaignId:campaign.id,fromIndex:campaign.index+1,toIndex:nextIndex+1,
+    total:campaign.queries.length,from:currentLabel,to:nextItem.label,
+    reason:'No hay más resultados confirmado',endMarkerConfirmed:true,rows:message.rows||0
+  });
   const next={...campaign,index:nextIndex,status:'starting',message:`Ubicación terminada. Siguiente: ${campaign.queries[nextIndex].label} (${nextIndex+1} de ${campaign.queries.length})…`,updatedAt:Date.now()};
   await chrome.storage.local.set({[CAMPAIGN_KEY]:next});
   try {return await launchCampaignQuery(next);}
