@@ -21,7 +21,10 @@
     label.append(checkbox,name);els.campaignProvinces.appendChild(label);
   }
   function sourceKey(url) {
-    try { const u=new URL(url); return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q")||u.searchParams.get("query")||""}&udm=${u.searchParams.get("udm")||""}`; }
+    try {
+      const u=new URL(url),query=u.searchParams.get("q")||u.searchParams.get("query")||decodeURIComponent(u.pathname.match(/\/maps\/search\/([^/]+)/)?.[1]||"");
+      return query?`${u.hostname}/maps/search?q=${encodeURIComponent(query)}`:`${u.hostname}${u.pathname}?udm=${u.searchParams.get("udm")||""}`;
+    }
     catch { return (url||"").split("#")[0]; }
   }
   function supported(url) {
@@ -329,7 +332,7 @@
     const query=els.searchQuery.value.trim();
     if(!query) {message("Escribí qué negocio o categoría querés buscar.");return;}
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting"||campaignState.status==="paused") {message("Continuá o reemplazá la campaña pausada antes de iniciar otra búsqueda.");return;}
-    const mapsUrl=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    const mapsUrl=`https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     const sameSearch=rows().length>0 && util.norm(util.fromSearch(state.searchUrl))===util.norm(query);
     const key=sameSearch?state.searchKey:sourceKey(mapsUrl);
     if(rows().length&&state.searchKey&&state.searchKey!==key &&

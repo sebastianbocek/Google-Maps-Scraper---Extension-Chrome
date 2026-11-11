@@ -42,7 +42,8 @@ async function appendBackgroundLog(level,event,details={}) {
 function searchSourceKey(url) {
   try {
     const parsed=new URL(url);
-    return `${parsed.hostname}${parsed.pathname}?q=${parsed.searchParams.get('q')||parsed.searchParams.get('query')||''}&udm=${parsed.searchParams.get('udm')||''}`;
+    const query=parsed.searchParams.get('q')||parsed.searchParams.get('query')||decodeURIComponent(parsed.pathname.match(/\/maps\/search\/([^/]+)/)?.[1]||'');
+    return query?`${parsed.hostname}/maps/search?q=${encodeURIComponent(query)}`:`${parsed.hostname}${parsed.pathname}?udm=${parsed.searchParams.get('udm')||''}`;
   } catch { return String(url||'').split('#')[0]; }
 }
 
@@ -81,7 +82,7 @@ function waitForTabComplete(tabId,timeoutMs=60000) {
 async function openMapsSearchAndStart(message) {
   const query=String(message.query||'').trim();
   if(!query)throw new Error('Escribí una búsqueda antes de comenzar.');
-  const url=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  const url=`https://www.google.com/maps/search/${encodeURIComponent(query)}`;
   const tab=await chrome.tabs.create({url,active:true});
   if(tab.id==null)throw new Error('Chrome no pudo crear la pestaña de Google Maps.');
   await waitForTabComplete(tab.id);
@@ -107,7 +108,7 @@ async function launchCampaignQuery(campaign) {
   if(!current||current.id!==campaign.id||current.status==='paused')return {ok:true,paused:true};
   const item=current.queries[current.index];
   if(!item)throw new Error('No quedan ubicaciones en la campaña.');
-  const url=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(item.query)}`;
+  const url=`https://www.google.com/maps/search/${encodeURIComponent(item.query)}`;
   const {glcsv_state:savedState={}}=await chrome.storage.local.get('glcsv_state');
   // Al abrir una ficha, Maps cambia /maps/search/ por /maps/place/ aunque la
   // lista y su posición sigan vivas en la pestaña. Al reanudar la misma query,

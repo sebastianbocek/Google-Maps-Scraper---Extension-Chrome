@@ -29,7 +29,8 @@
   function sourceKey(url) {
     try {
       const u = new URL(url);
-      return `${u.hostname}${u.pathname}?q=${u.searchParams.get("q") || u.searchParams.get("query") || ""}&udm=${u.searchParams.get("udm") || ""}`;
+      const query=u.searchParams.get("q")||u.searchParams.get("query")||decodeURIComponent(u.pathname.match(/\/maps\/search\/([^/]+)/)?.[1]||"");
+      return query?`${u.hostname}/maps/search?q=${encodeURIComponent(query)}`:`${u.hostname}${u.pathname}?udm=${u.searchParams.get("udm")||""}`;
     } catch { return url?.split("#")[0] || ""; }
   }
   function digitsPhone(text) {
