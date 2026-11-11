@@ -34,6 +34,7 @@
 - El panel abre de forma progresiva durante una extracción activa; difiere la carga del historial y evita volver a deduplicar todas las fichas en cada actualización.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.
 - Mantiene la pestaña de Maps fuera del descarte automático de memoria, registra al cambiar a segundo plano y reacciona a nuevas fichas mediante cambios del DOM en vez de depender de consultas repetidas con temporizadores. Esto reduce las pausas al trabajar en otras pestañas.
+- Un watchdog del service worker envía un pulso cada 30 segundos mientras hay una extracción activa. Si el spinner queda atascado con Maps oculto, ese pulso despierta la rutina de recuperación para probar las fichas recientes y volver a desplazarse.
 - Incluye un registro de actividad con información de cada scroll, progreso y error, y permite copiarlo para diagnosticar problemas. En campañas conserva un historial separado de inicios, cierres y cambios de ciudad; cada avance automático incluye origen, destino y confirmación de **“No hay más resultados”**. El background bloquea el cambio si el escaneo no confirma explícitamente ese marcador.
 - Limpia la exportación antes de descargar: selecciona categorías, excluye ciudades, permite elegir una ubicación objetivo y filtrar negocios con o sin sitio web y teléfono.
 - Descarga los resultados como archivo `.csv`, listo para revisar en una hoja de cálculo o importar a un CRM.

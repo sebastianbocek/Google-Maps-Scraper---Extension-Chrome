@@ -14,7 +14,28 @@
     titles: 'h1,h2,h3,[role="heading"],.DUwDvf,.qrShPb,.fontHeadlineLarge,.OSrXXb,.X7NTVe,span',
     phone: 'a[href^="tel:"], [data-item-id^="phone:tel:"], [aria-label*="teléfono" i], [aria-label*="telefone" i], [aria-label*="phone" i], [data-tooltip*="teléfono" i]'
   };
-  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const backgroundWakeWaiters=new Set();
+  const wait = ms => new Promise(resolve=>{
+    let settled=false;
+    const finish=()=>{if(settled)return;settled=true;clearTimeout(timer);backgroundWakeWaiters.delete(wake);resolve();};
+    const wake=()=>finish();
+    const timer=setTimeout(finish,ms);
+    backgroundWakeWaiters.add(wake);
+  });
+  function waitForDomMutationOrWake(timeout=1200) {
+    return new Promise(resolve=>{
+      let settled=false;
+      const finish=reason=>{
+        if(settled)return;
+        settled=true;clearTimeout(timer);observer.disconnect();backgroundWakeWaiters.delete(wake);resolve(reason);
+      };
+      const observer=new MutationObserver(()=>finish("mutation"));
+      observer.observe(document.body||document.documentElement,{childList:true,subtree:true,characterData:true});
+      const timer=setTimeout(()=>finish("timeout"),timeout);
+      const wake=()=>finish("background-wake");
+      backgroundWakeWaiters.add(wake);
+    });
+  }
   const plain = s => String(s ?? "").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
   const canonical = s => plain(s).toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const safeText = el => plain(el?.innerText || el?.textContent || "");
@@ -341,11 +362,11 @@
     while(Date.now()-started<9000) {
       title=document.querySelector('h1.DUwDvf, h1[role="heading"], h1');
       if(title&&safeText(title))break;
-      await wait(180);
+      await waitForDomMutationOrWake(1200);
     }
     // The worker visits a public Maps place URL in its own inactive tab. Read
     // the rendered page DOM; do not call undocumented Maps endpoints.
-    await wait(260);
+    await waitForDomMutationOrWake(350);
     let scope=null, bestScore=-1;
     for(let node=title,d=0;node&&node!==document.body&&d<14;node=node.parentElement,d++) {
       const textLength=(node.innerText||"").length;
@@ -547,8 +568,9 @@
       let settled=false,quietTimer=null;
       const finish=result=>{
         if(settled)return;
-        settled=true;clearTimeout(hardTimer);clearTimeout(quietTimer);observer.disconnect();resolve(result);
+        settled=true;clearTimeout(hardTimer);clearTimeout(quietTimer);observer.disconnect();backgroundWakeWaiters.delete(onBackgroundWake);resolve(result);
       };
+      const onBackgroundWake=()=>finish({endReached:hasNoMoreResults(),loading:resultsSpinnerVisible(),cardsAfter:selectCards().length,backgroundWake:true});
       const check=()=>{
         if(stopped){finish({endReached:false,loading:resultsSpinnerVisible(),stopped:true});return;}
         if(hasNoMoreResults()){finish({endReached:true,loading:false});return;}
@@ -560,6 +582,7 @@
       const observer=new MutationObserver(check);
       observer.observe(root,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-busy","aria-label","class","style"]});
       const hardTimer=setTimeout(()=>finish({endReached:hasNoMoreResults(),loading:resultsSpinnerVisible(),cardsAfter:selectCards().length,timeout:true}),timeout);
+      backgroundWakeWaiters.add(onBackgroundWake);
       check();
     });
   }
@@ -596,7 +619,7 @@
       const cards=selectCards();
       const routeMatches=canonical(utils.fromSearch(location.href))===canonical(desired);
       if(routeMatches&&(cards.length||hasNoMoreResults()))return {ok:true,before,actual:mapsSearchValue(),cards:cards.length,endReached:hasNoMoreResults(),routeMatches,url:location.href};
-      await wait(250);
+      await waitForDomMutationOrWake(1200);
     }
     return {ok:false,before,actual:mapsSearchValue(),cards:selectCards().length,endReached:hasNoMoreResults(),routeMatches:canonical(utils.fromSearch(location.href))===canonical(desired),url:location.href};
   }
@@ -639,12 +662,12 @@
         // Maps can return to its list at scrollTop=0 after history.back().
         // Restore the pre-click position before searching farther down.
         const first=restoreResultsPosition(position);
-        await wait(260);
+        await waitForDomMutationOrWake(500);
         const second=restoreResultsPosition(position);
         return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
       }
       if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
-      await wait(180);
+      await waitForDomMutationOrWake(1200);
     }
     return {ok:false,url:location.href};
   }
@@ -672,7 +695,7 @@
         const routeOpened=location.href!==previousUrl&&/\/maps\/place\//i.test(location.pathname);
         if(routeOpened){opened=true;openedBy="place-url";break;}
         if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;openedBy="business-title";break;}
-        await wait(160);
+        await waitForDomMutationOrWake(1200);
       }
       if(!opened)continue;
       const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition,expectedQuery);
@@ -866,7 +889,14 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        noProgress=endReached?0:(hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
+        const hiddenSpinnerWake=Boolean(scroll.backgroundWake&&document.visibilityState==="hidden"&&scroll.loading&&!hasNew&&!endReached);
+        noProgress=endReached?0:hiddenSpinnerWake?MAX_NO_PROGRESS:
+          (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
+        if(hiddenSpinnerWake)logEvent(state,"warn","Maps sigue mostrando el spinner en segundo plano; se inicia la recuperación desde las últimas fichas cargadas",{
+          campaignId:campaignId||undefined,campaignQuery:campaignQuery||undefined,rows:rows.size,
+          inspected:inspected.size,visibleCards:selectCards().length,scrollPosition:captureResultsPosition().top,
+          recoveryRule:"abrir fichas recientes desde la última hacia atrás y volver a desplazar"
+        });
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           while(!stopped&&!endReached&&!hasNew) {
@@ -1002,11 +1032,16 @@
       running=false;
       currentRun=null;
       stopped=false;
+      chrome.runtime.sendMessage({type:"GLCSV_SCAN_FINISHED",campaignId:campaignId||"",status:state.status}).catch(()=>{});
       if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {
-    if(message?.type==="GLCSV_DETAIL_EXTRACT"){
+    if(message?.type==="GLCSV_BACKGROUND_TICK"){
+      for(const wake of [...backgroundWakeWaiters])wake();
+      sendResponse({ok:true,running,visibility:document.visibilityState||"unknown"});
+      return false;
+    } else if(message?.type==="GLCSV_DETAIL_EXTRACT"){
       extractPlaceDetails(message.row||{}).then(row=>sendResponse({ok:true,row})).catch(error=>sendResponse({ok:false,error:String(error?.message||error)}));
       return true;
     } else if (message?.type==="GLCSV_START") {

@@ -3,8 +3,37 @@
 importScripts('data_utils.js');
 const CAMPAIGN_KEY='glcsv_campaign';
 const CAMPAIGN_LOG_KEY='glcsv_campaign_logs';
+const WATCHDOG_ALARM='glcsv_background_watchdog';
+let watchdogTabInFlight=null;
+
+async function startBackgroundWatchdog() {
+  await chrome.alarms.create(WATCHDOG_ALARM,{periodInMinutes:0.5});
+}
+async function stopBackgroundWatchdog() {
+  await chrome.alarms.clear(WATCHDOG_ALARM).catch(()=>{});
+}
+async function wakeBackgroundScanner() {
+  const stored=await chrome.storage.local.get(['glcsv_state',CAMPAIGN_KEY]);
+  const state=stored.glcsv_state||{},campaign=stored[CAMPAIGN_KEY];
+  const campaignActive=campaign&&['starting','running'].includes(campaign.status);
+  const scanActive=state.status==='running';
+  if(!campaignActive&&!scanActive){await stopBackgroundWatchdog();return;}
+  const tabId=campaignActive?(campaign.tabId??state.tabId):state.tabId;
+  if(!Number.isInteger(tabId))return;
+  if(watchdogTabInFlight===tabId)return;
+  try {
+    watchdogTabInFlight=tabId;
+    const tab=await chrome.tabs.get(tabId);
+    if(tab.discarded)await protectMapsTabFromDiscard(tabId);
+    await chrome.tabs.sendMessage(tabId,{type:'GLCSV_BACKGROUND_TICK'});
+  } catch {} finally {if(watchdogTabInFlight===tabId)watchdogTabInFlight=null;}
+}
+chrome.alarms.onAlarm.addListener(alarm=>{
+  if(alarm.name===WATCHDOG_ALARM)wakeBackgroundScanner().catch(()=>{});
+});
 
 async function pauseInterruptedWork(reason) {
+  await stopBackgroundWatchdog();
   const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
   const campaign=stored[CAMPAIGN_KEY];
   const state=stored.glcsv_state;
@@ -169,6 +198,7 @@ async function openMapsSearchAndStart(message) {
     tabId:tab.id
   });
   if(!result?.ok)throw new Error(result?.error||'Google Maps no pudo iniciar la extracción.');
+  await startBackgroundWatchdog();
   return {ok:true,tabId:tab.id};
 }
 
@@ -239,6 +269,7 @@ async function launchCampaignQuery(campaign) {
     searchUrl:(await chrome.tabs.get(tab.id)).url||url,tabId:tab.id,campaignId:beforeStart.id,campaignQuery:item.query
   });
   if(!result?.ok)throw new Error(result?.error||`No se pudo iniciar la búsqueda de ${item.label}.`);
+  await startBackgroundWatchdog();
   const finalCampaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
   if(finalCampaign?.id===beforeStart.id&&finalCampaign.status!=='paused')await chrome.storage.local.set({[CAMPAIGN_KEY]:{...finalCampaign,status:'running',message:`Buscando ${item.label} (${beforeStart.index+1} de ${beforeStart.queries.length})…`,updatedAt:Date.now()}});
   else if(finalCampaign?.id===beforeStart.id&&finalCampaign.status==='paused')await chrome.tabs.sendMessage(tab.id,{type:'GLCSV_STOP'}).catch(()=>{});
@@ -277,6 +308,7 @@ async function finishCampaignQuery(message) {
       campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
       location:label,reason:message.reason,rows:message.rows||0,endMarkerConfirmed:Boolean(message.endMarkerConfirmed)
     });
+    await stopBackgroundWatchdog();
     return {ok:true,paused:true};
   }
   const currentItem=campaign.queries[campaign.index];
@@ -291,6 +323,7 @@ async function finishCampaignQuery(message) {
       location:currentLabel,reason:message.reason,rows:message.rows||0,
       endMarkerConfirmed:Boolean(message.endMarkerConfirmed)
     });
+    await stopBackgroundWatchdog();
     return {ok:true,paused:true,blocked:true};
   }
   await appendBackgroundLog(emptyViewAdvance?'warn':'info',emptyViewAdvance?
@@ -309,6 +342,7 @@ async function finishCampaignQuery(message) {
       campaignId:campaign.id,total:campaign.queries.length,finalLocation:currentLabel,
       finalCityEndMarkerConfirmed:Boolean(message.endMarkerConfirmed)
     });
+    await stopBackgroundWatchdog();
     return {ok:true,complete:true};
   }
   const nextItem=campaign.queries[nextIndex];
@@ -334,6 +368,7 @@ async function pauseCampaign() {
   if(Number.isInteger(campaign.tabId)) {
     try {await chrome.tabs.sendMessage(campaign.tabId,{type:'GLCSV_STOP'});} catch {}
   }
+  await stopBackgroundWatchdog();
   const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
   if(latest?.id===campaign.id&&latest.status==='paused')await chrome.storage.local.set({[CAMPAIGN_KEY]:{...latest,message:`Campaña pausada en ${campaign.queries[campaign.index]?.label||'la ubicación actual'}. Podés continuar desde ahí.`,updatedAt:Date.now()}});
   return {ok:true};
@@ -393,6 +428,7 @@ async function continueSavedSearch() {
     tabId:tab.id
   });
   if(!result?.ok)throw new Error(result?.error||'No se pudo reanudar la extracción.');
+  await startBackgroundWatchdog();
   return {ok:true,tabId:tab.id};
 }
 
@@ -465,6 +501,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message?.type === 'GLCSV_CAMPAIGN_QUERY_FINISHED') {
     finishCampaignQuery(message).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if (message?.type === 'GLCSV_SCAN_FINISHED') {
+    (async()=>{
+      const {glcsv_campaign:campaign}=await chrome.storage.local.get('glcsv_campaign');
+      if(!campaign||!['starting','running'].includes(campaign.status))await stopBackgroundWatchdog();
+      respond({ok:true});
+    })().catch(error=>respond({ok:false,error:String(error?.message||error)}));
     return true;
   }
   if (message?.type !== 'GLCSV_OPEN_WHATSAPP') return false;
