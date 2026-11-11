@@ -804,6 +804,23 @@
         showOverlay(state.message);
       }
       if(stopped)await settleActiveDetails();else await drainDetailQueue();
+      // Una campaña no cambia de ciudad ni deja fichas atrás: Maps ya confirmó
+      // el fin, así que reabrimos las fichas fallidas hasta completar la cola.
+      // El usuario puede detener la campaña mientras espera/reintenta.
+      let pendingRetryRound=0;
+      while(campaignId&&endReached&&!stopped&&pendingDetails.size){
+        pendingRetryRound++;
+        detailQueue.push(...pendingDetails.values());
+        state.message=`Reintentando ${pendingDetails.size} fichas pendientes antes de avanzar (${pendingRetryRound})…`;
+        showOverlay(state.message);
+        logEvent(state,"warn","Reintentando fichas pendientes antes del cambio de ciudad",{
+          campaignQuery,campaignId,retryRound:pendingRetryRound,pending:pendingDetails.size,
+          businesses:[...pendingDetails.values()].map(row=>row.name).filter(Boolean).slice(0,20)
+        });
+        pumpDetailQueue();
+        await drainDetailQueue();
+        if(pendingDetails.size&&!stopped)await wait(Math.min(5000,1000*pendingRetryRound));
+      }
       if(!endReached&&hasNoMoreResults()&&!selectCards().some(card=>!inspected.has(card.key)))endReached=true;
       const limitReached=limit>0&&queryProcessed>=limit;
       const detailsNeedRetry=pendingDetails.size>0;
@@ -811,7 +828,7 @@
       const stalledWithoutEnd=!stopped&&!endReached&&limitStoppedCampaign;
       const needsContinue=!stopped&&(detailsNeedRetry||stalledWithoutEnd);
       state.status=stopped||needsContinue?"paused":"complete";
-      finishReason=stopped?"manual":detailsNeedRetry||stalledWithoutEnd?"error":limitReached?"limit":"complete";
+      finishReason=stopped?"manual":needsContinue?"error":limitReached?"limit":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
         detailsNeedRetry?`Pausado: ${pendingDetails.size} fichas quedaron pendientes de completar. Pulsa continuar para reintentarlas; tus resultados están guardados.`:
         limitStoppedCampaign?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda pausada aquí; no se iniciará otra ciudad.`:
@@ -819,7 +836,7 @@
         stalledWithoutEnd?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda aquí; no se iniciará otra ciudad.`:
         endReached?`Finalizado: Maps confirmó que no hay más resultados. ${rows.size} fichas detectadas; CSV disponible.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
-      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,endMarkerConfirmed:endReached,campaignQuery:campaignQuery||undefined,stalledWithoutEnd,rows:rows.size});
+      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,endMarkerConfirmed:endReached,campaignQuery:campaignQuery||undefined,stalledWithoutEnd,detailsNeedRetry,pendingDetails:pendingDetails.size,pendingRetryRound,rows:rows.size});
     } catch(err) {
       await settleActiveDetails().catch(()=>{});
       state.status="error";
