@@ -483,14 +483,17 @@
   }
   async function scrollUntilNewResults(inspected,maxSteps=20) {
     for(let step=1;step<=maxSteps&&!stopped;step++) {
-      if(hasNoMoreResults())return {endReached:true,newResults:false,scrollSteps:step-1};
+      let fresh=selectCards().filter(card=>!inspected.has(card.key));
+      if(hasNoMoreResults())return {endReached:fresh.length===0,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:step-1};
+      if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step-1};
       const cards=selectCards();
       const outcome=await advanceResults(cards);
-      if(outcome.endReached||hasNoMoreResults())return {endReached:true,newResults:false,scrollSteps:step,...outcome};
-      const fresh=selectCards().filter(card=>!inspected.has(card.key));
+      fresh=selectCards().filter(card=>!inspected.has(card.key));
+      if(outcome.endReached||hasNoMoreResults())return {endReached:fresh.length===0,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:step,...outcome};
       if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step,...outcome};
     }
-    return {endReached:hasNoMoreResults(),newResults:false,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
+    const fresh=selectCards().filter(card=>!inspected.has(card.key));
+    return {endReached:hasNoMoreResults()&&!fresh.length,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
   }
   function hasNoMoreResults() {
     const endings=new Set(["no hay mas resultados","no more results"]);
@@ -537,7 +540,8 @@
     return false;
   }
   async function recoverStalledResults(recoveryTried,inspected) {
-    if(hasNoMoreResults())return {recovered:false,endReached:true,attempted:recoveryTried.size};
+    const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
+    if(hasNoMoreResults())return {recovered:false,endReached:initiallyFresh.length===0,newResults:initiallyFresh.length>0,attempted:recoveryTried.size};
     const candidates=selectCards().filter(card=>inspected.has(card.key)).reverse();
     const attemptedNames=[];
     for(const card of candidates) {
@@ -551,7 +555,10 @@
       const started=Date.now();
       let opened=false;
       while(Date.now()-started<2600&&!stopped) {
-        if(hasNoMoreResults())return {recovered:false,endReached:true,card:card.name,attemptedNames};
+        if(hasNoMoreResults()) {
+          const fresh=selectCards().filter(item=>!inspected.has(item.key));
+          return {recovered:false,endReached:fresh.length===0,newResults:fresh.length>0,card:card.name,attemptedNames};
+        }
         if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;break;}
         await wait(160);
       }
@@ -640,7 +647,7 @@
     showOverlay("Buscando fichas...");
     let noProgress=0;
     let iterations=0;
-    let endReached=hasNoMoreResults();
+    let endReached=false;
     const recoveryTried=new Set();
     let finishReason="error";
     try {
@@ -648,10 +655,10 @@
       for(const row of pendingDetails.values())detailQueue.push(row);
       pumpDetailQueue();
       while (!stopped && !endReached && (limit===0 || queryProcessed < limit)) {
-        if(hasNoMoreResults()){endReached=true;break;}
         iterations++;
         const cards=selectCards();
         const pending=cards.filter(c=>!inspected.has(c.key));
+        if(hasNoMoreResults()&&!pending.length){endReached=true;break;}
         let count=0;
         for (const card of pending) {
           if (stopped || (limit>0 && queryProcessed>=limit)) break;
@@ -706,7 +713,8 @@
         const beforeNoProgress=noProgress;
         const scroll=await advanceResults(cards);
         let hasNew=selectCards().some(c=>!inspected.has(c.key));
-        endReached=Boolean(scroll.endReached||hasNoMoreResults());
+        const endMarkerVisible=Boolean(scroll.endReached||hasNoMoreResults());
+        endReached=endMarkerVisible&&!hasNew;
         noProgress=endReached?0:(hasNew||count>0?0:noProgress+1);
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
@@ -715,12 +723,13 @@
             state.message=`Maps sigue cargando en esta ciudad. Probando fichas recientes (${recoveryCycles})…`;
             showOverlay(state.message);
             recovery=await recoverStalledResults(recoveryTried,inspected);
-            if(recovery.endReached||hasNoMoreResults()){endReached=true;break;}
+            if(recovery.endReached){endReached=true;break;}
+            if(recovery.newResults){hasNew=true;noProgress=0;break;}
             if(recovery.recovered) {
               logEvent(state,"warn","Se abrió una ficha previa; desplazando hasta que aparezcan resultados nuevos",{name:recovery.card,attemptedCards:recovery.attemptedNames});
               recoveryScroll=await scrollUntilNewResults(inspected);
-              endReached=Boolean(recoveryScroll.endReached||hasNoMoreResults());
               hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
+              endReached=Boolean(recoveryScroll.endReached&&!hasNew);
               if(endReached||hasNew){noProgress=0;break;}
             }
             if(!recovery.attemptedNames?.length) {
@@ -737,15 +746,18 @@
           }
         }
         state.message=endReached?`Google Maps confirmó que no hay más resultados. ${rows.size} fichas guardadas.`:
+          endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
           recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
-        logEvent(state,endReached?"info":noProgress?"warn":"info",endReached?"Fin de resultados confirmado":"Desplazamiento para cargar más resultados",{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,...scroll});
+        const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
         showOverlay(state.message);
       }
       if(stopped)await settleActiveDetails();else await drainDetailQueue();
+      if(!endReached&&hasNoMoreResults()&&!selectCards().some(card=>!inspected.has(card.key)))endReached=true;
       const limitReached=limit>0&&queryProcessed>=limit;
       const detailsNeedRetry=pendingDetails.size>0;
       const limitStoppedCampaign=Boolean(campaignId&&limitReached&&!endReached);
