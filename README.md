@@ -27,6 +27,7 @@
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
 - Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa hasta cinco fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
 - Guarda la cola de fichas pendientes junto con los resultados; al continuar, reintenta el enriquecimiento pendiente sin volver a recorrer las fichas ya guardadas.
+- Antes de pasar a la siguiente ciudad, espera la confirmación visible de Google Maps **“No hay más resultados”**. Si llega a ocho desplazamientos sin avance, vuelve a abrir fichas detectadas desde la última hacia arriba y desplaza la lista hasta que aparezcan resultados nuevos; continúa en esa ciudad hasta que Maps muestre el marcador de fin.
 - Permite marcar y desmarcar categorías de negocio con casillas antes de exportar. Todas comienzan desmarcadas; hay acciones para seleccionar todas o ninguna y el contador se actualiza al instante.
 - Permite iniciar, detener y continuar la extracción desde el panel de la extensión.
 - Guarda el progreso por ficha para poder detener o reanudar una extracción, incluso después de cambiar de pestaña o cerrar la pestaña de Maps.

@@ -468,18 +468,99 @@
       scroller.scrollTop=Math.min(maxTop,old+step);
       scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
       if(scroller.scrollTop===old) cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
-      await wait(1700);
+      const outcome=await waitForResultsOutcome(beforeCount,2500);
       const afterCount=selectCards().length;
       const after=scroller.scrollTop;
-      return {moved:after!==old||afterCount>beforeCount,method:"container",target:`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`,topBefore:old,topAfter:after,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:beforeCount,cardsAfter:afterCount};
+      return {moved:after!==old||afterCount>beforeCount,method:"container",target:`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`,topBefore:old,topAfter:after,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:beforeCount,cardsAfter:afterCount,...outcome};
     }
     const old=window.scrollY;
     const step=Math.max(520,window.innerHeight*.78);
     cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
     window.scrollBy({top:step,behavior:"instant"});
-    await wait(1700);
+    const outcome=await waitForResultsOutcome(beforeCount,2500);
     const afterCount=selectCards().length;
-    return {moved:window.scrollY!==old||afterCount>beforeCount,method:"window-fallback",topBefore:old,topAfter:window.scrollY,cardsBefore:beforeCount,cardsAfter:afterCount};
+    return {moved:window.scrollY!==old||afterCount>beforeCount,method:"window-fallback",topBefore:old,topAfter:window.scrollY,cardsBefore:beforeCount,cardsAfter:afterCount,...outcome};
+  }
+  async function scrollUntilNewResults(inspected,maxSteps=20) {
+    for(let step=1;step<=maxSteps&&!stopped;step++) {
+      if(hasNoMoreResults())return {endReached:true,newResults:false,scrollSteps:step-1};
+      const cards=selectCards();
+      const outcome=await advanceResults(cards);
+      if(outcome.endReached||hasNoMoreResults())return {endReached:true,newResults:false,scrollSteps:step,...outcome};
+      const fresh=selectCards().filter(card=>!inspected.has(card.key));
+      if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step,...outcome};
+    }
+    return {endReached:hasNoMoreResults(),newResults:false,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
+  }
+  function hasNoMoreResults() {
+    const endings=new Set(["no hay mas resultados","no more results"]);
+    const scope=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||getScrollTarget(selectCards())||document.body;
+    const containsEndMarker=text=>String(text||"").split(/[\n\r]+/).some(line=>endings.has(canonical(line).replace(/[.!?…]+$/g,"").trim()));
+    if(containsEndMarker(scope?.innerText))return true;
+    return scope!==document.body&&containsEndMarker(document.body?.innerText);
+  }
+  function resultsSpinnerVisible() {
+    const scope=document.querySelector('div[role="feed"]')||getScrollTarget(selectCards())||document.body;
+    const selectors='[role="progressbar"],[aria-busy="true"],[aria-label*="cargando" i],[aria-label*="loading" i],[aria-label*="carregando" i]';
+    for(const el of scope.querySelectorAll(selectors)) {
+      if(el.closest("#glcsv-float"))continue;
+      const r=rect(el), style=getComputedStyle(el);
+      if(r.width>0&&r.height>0&&style.visibility!=="hidden"&&style.display!=="none")return true;
+    }
+    return false;
+  }
+  async function waitForResultsOutcome(previousCount,timeout=10000) {
+    const started=Date.now();
+    let stableSince=Date.now();
+    while(Date.now()-started<timeout) {
+      if(hasNoMoreResults())return {endReached:true,loading:false};
+      if(selectCards().length>previousCount)return {endReached:false,loading:resultsSpinnerVisible()};
+      if(resultsSpinnerVisible())stableSince=Date.now();
+      else if(Date.now()-stableSince>=1100)return {endReached:false,loading:false};
+      await wait(250);
+    }
+    return {endReached:hasNoMoreResults(),loading:resultsSpinnerVisible()};
+  }
+  function cardDetailHeadingVisible(name) {
+    const target=canonical(name);
+    return [...document.querySelectorAll('h1,h2,[role="heading"],.DUwDvf')]
+      .some(el=>rect(el).width>0&&canonical(safeText(el))===target);
+  }
+  async function restoreSearchAfterRecovery(previousUrl) {
+    if(!/\/maps\/place\//i.test(location.pathname)||location.href===previousUrl)return true;
+    history.back();
+    const started=Date.now();
+    while(Date.now()-started<7000) {
+      if(!/\/maps\/place\//i.test(location.pathname)&&selectCards().length)return true;
+      await wait(180);
+    }
+    return false;
+  }
+  async function recoverStalledResults(recoveryTried,inspected) {
+    if(hasNoMoreResults())return {recovered:false,endReached:true,attempted:recoveryTried.size};
+    const candidates=selectCards().filter(card=>inspected.has(card.key)).reverse();
+    const attemptedNames=[];
+    for(const card of candidates) {
+      if(attemptedNames.length>=12)break;
+      if(stopped)return {recovered:false,stopped:true,attemptedNames};
+      if(recoveryTried.has(card.key)||!card.element?.isConnected)continue;
+      recoveryTried.add(card.key);
+      attemptedNames.push(card.name);
+      const previousUrl=location.href;
+      if(!clickCard(card))continue;
+      const started=Date.now();
+      let opened=false;
+      while(Date.now()-started<2600&&!stopped) {
+        if(hasNoMoreResults())return {recovered:false,endReached:true,card:card.name,attemptedNames};
+        if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;break;}
+        await wait(160);
+      }
+      if(!opened)continue;
+      const restored=await restoreSearchAfterRecovery(previousUrl);
+      if(restored)return {recovered:true,card:card.name,attempted:recoveryTried.size,attemptedNames};
+      return {recovered:false,card:card.name,restoreFailed:true,attempted:recoveryTried.size,attemptedNames};
+    }
+    return {recovered:false,attempted:recoveryTried.size,attemptedNames};
   }
   const MAX_LOG_ENTRIES=200;
   const MAX_NO_PROGRESS=8;
@@ -559,12 +640,15 @@
     showOverlay("Buscando fichas...");
     let noProgress=0;
     let iterations=0;
+    let endReached=hasNoMoreResults();
+    const recoveryTried=new Set();
     let finishReason="error";
     try {
       // Requeue durable work from a previous pause/reload before scanning further.
       for(const row of pendingDetails.values())detailQueue.push(row);
       pumpDetailQueue();
-      while (!stopped && (limit===0 || queryProcessed < limit) && noProgress < MAX_NO_PROGRESS && iterations < 10000) {
+      while (!stopped && !endReached && (limit===0 || queryProcessed < limit)) {
+        if(hasNoMoreResults()){endReached=true;break;}
         iterations++;
         const cards=selectCards();
         const pending=cards.filter(c=>!inspected.has(c.key));
@@ -621,10 +705,41 @@
         showOverlay(state.message);
         const beforeNoProgress=noProgress;
         const scroll=await advanceResults(cards);
-        const hasNew=selectCards().some(c=>!inspected.has(c.key));
-        noProgress=hasNew||count>0||scroll.moved?0:noProgress+1;
-        state.message=`Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
-        logEvent(state,noProgress?"warn":"info","Desplazamiento para cargar más resultados",{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,...scroll});
+        let hasNew=selectCards().some(c=>!inspected.has(c.key));
+        endReached=Boolean(scroll.endReached||hasNoMoreResults());
+        noProgress=endReached?0:(hasNew||count>0?0:noProgress+1);
+        let recovery=null, recoveryScroll=null, recoveryCycles=0;
+        if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
+          while(!stopped&&!endReached&&!hasNew) {
+            recoveryCycles++;
+            state.message=`Maps sigue cargando en esta ciudad. Probando fichas recientes (${recoveryCycles})…`;
+            showOverlay(state.message);
+            recovery=await recoverStalledResults(recoveryTried,inspected);
+            if(recovery.endReached||hasNoMoreResults()){endReached=true;break;}
+            if(recovery.recovered) {
+              logEvent(state,"warn","Se abrió una ficha previa; desplazando hasta que aparezcan resultados nuevos",{name:recovery.card,attemptedCards:recovery.attemptedNames});
+              recoveryScroll=await scrollUntilNewResults(inspected);
+              endReached=Boolean(recoveryScroll.endReached||hasNoMoreResults());
+              hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
+              if(endReached||hasNew){noProgress=0;break;}
+            }
+            if(!recovery.attemptedNames?.length) {
+              // We tried all currently loaded cards. Start another recovery
+              // cycle in the same city instead of advancing on a missing marker.
+              recoveryTried.clear();
+              await wait(900);
+            }
+            noProgress=MAX_NO_PROGRESS;
+            state.message=`Sigo en esta ciudad hasta que carguen fichas nuevas o Maps confirme “No hay más resultados”.`;
+            logEvent(state,"warn","La ciudad sigue activa; no se avanza sin resultados nuevos o el marcador de fin",{recoveryCycles,attemptedCards:recovery.attemptedNames,spinnerVisible:resultsSpinnerVisible(),scrollSteps:recoveryScroll?.scrollSteps||0});
+            state.updatedAt=Date.now();
+            await scheduleCheckpoint(true);
+          }
+        }
+        state.message=endReached?`Google Maps confirmó que no hay más resultados. ${rows.size} fichas guardadas.`:
+          recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
+          `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
+        logEvent(state,endReached?"info":noProgress?"warn":"info",endReached?"Fin de resultados confirmado":"Desplazamiento para cargar más resultados",{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
@@ -633,15 +748,19 @@
       if(stopped)await settleActiveDetails();else await drainDetailQueue();
       const limitReached=limit>0&&queryProcessed>=limit;
       const detailsNeedRetry=pendingDetails.size>0;
-      const needsContinue=!stopped&&(detailsNeedRetry||(!limitReached&&(noProgress>=MAX_NO_PROGRESS||iterations>=10000)));
+      const limitStoppedCampaign=Boolean(campaignId&&limitReached&&!endReached);
+      const stalledWithoutEnd=!stopped&&!endReached&&limitStoppedCampaign;
+      const needsContinue=!stopped&&(detailsNeedRetry||stalledWithoutEnd);
       state.status=stopped||needsContinue?"paused":"complete";
-      finishReason=stopped?"manual":detailsNeedRetry?"error":needsContinue?"exhausted":limitReached?"limit":"complete";
+      finishReason=stopped?"manual":detailsNeedRetry||stalledWithoutEnd?"error":limitReached?"limit":"complete";
       state.message=stopped?`Detenido. ${rows.size} fichas guardadas; podés descargar o continuar.`:
         detailsNeedRetry?`Pausado: ${pendingDetails.size} fichas quedaron pendientes de completar. Pulsa continuar para reintentarlas; tus resultados están guardados.`:
+        limitStoppedCampaign?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda pausada aquí; no se iniciará otra ciudad.`:
         limitReached?`Límite alcanzado: ${rows.size} fichas. CSV disponible.`:
-        needsContinue?`Pausado: Maps no cargó nuevos resultados tras ${noProgress} intentos. ${rows.size} fichas guardadas; podés continuar.`:
+        stalledWithoutEnd?`Límite de fichas alcanzado antes de que Maps confirmara el final. La campaña queda aquí; no se iniciará otra ciudad.`:
+        endReached?`Finalizado: Maps confirmó que no hay más resultados. ${rows.size} fichas detectadas; CSV disponible.`:
         `Finalizado: ${rows.size} fichas detectadas. CSV disponible.`;
-      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,stopped,rows:rows.size});
+      logEvent(state,needsContinue?"warn":"info",state.message,{iterations,noProgress,limitReached,limitStoppedCampaign,stopped,endReached,stalledWithoutEnd,rows:rows.size});
     } catch(err) {
       await settleActiveDetails().catch(()=>{});
       state.status="error";
