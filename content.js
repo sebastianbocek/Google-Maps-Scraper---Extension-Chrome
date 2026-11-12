@@ -504,21 +504,6 @@
     const after=resultsSnapshot(scroller);
     return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,spinnerDetected,...outcome};
   }
-  async function scrollUntilNewResults(inspected,maxSteps=20) {
-    for(let step=1;step<=maxSteps&&!stopped;step++) {
-      let fresh=selectCards().filter(card=>!inspected.has(card.key));
-      if(hasNoMoreResults())return {endReached:fresh.length===0,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:step-1};
-      if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step-1};
-      const cards=selectCards();
-      const outcome=await advanceResults(cards);
-      fresh=selectCards().filter(card=>!inspected.has(card.key));
-      if(outcome.endReached||hasNoMoreResults())return {endReached:fresh.length===0,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:step,...outcome};
-      if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step,...outcome};
-      if(outcome.timedOut)return {endReached:false,newResults:false,newCount:0,scrollSteps:step,stalled:true,...outcome};
-    }
-    const fresh=selectCards().filter(card=>!inspected.has(card.key));
-    return {endReached:hasNoMoreResults()&&!fresh.length,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
-  }
   async function restorePreviouslyLoadedResults(targetCount,maxSteps=80) {
     let steps=0,lastCount=selectCards().length;
     while(steps<maxSteps&&!stopped) {
@@ -574,112 +559,6 @@
       .find(input=>rect(input).width>0&&rect(input).height>0)||null;
   }
   function mapsSearchValue() {return plain(mapsSearchInput()?.value||"");}
-  async function submitMapsSearch(query,timeout=16000) {
-    if(!/\/maps(?:\/|$)/i.test(location.pathname))return {ok:false,reason:"not-on-maps",url:location.href};
-    const input=mapsSearchInput(),desired=plain(query);
-    if(!input||!desired)return {ok:false,reason:input?"empty-query":"search-box-not-found",actual:mapsSearchValue()};
-    const before=mapsSearchValue();
-    try {
-      input.focus();
-      const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")?.set;
-      if(setter)setter.call(input,desired);else input.value=desired;
-      input.dispatchEvent(new InputEvent("input",{bubbles:true,inputType:"insertText",data:desired}));
-      input.dispatchEvent(new Event("change",{bubbles:true}));
-      input.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true}));
-      input.dispatchEvent(new KeyboardEvent("keyup",{key:"Enter",code:"Enter",keyCode:13,which:13,bubbles:true}));
-    } catch(error) {return {ok:false,reason:String(error?.message||error),before,actual:mapsSearchValue()};}
-    const started=Date.now();
-    while(Date.now()-started<timeout&&!stopped) {
-      const cards=selectCards();
-      const routeMatches=canonical(utils.fromSearch(location.href))===canonical(desired);
-      if(routeMatches&&(cards.length||hasNoMoreResults()))return {ok:true,before,actual:mapsSearchValue(),cards:cards.length,endReached:hasNoMoreResults(),routeMatches,url:location.href};
-      await wait(250);
-    }
-    return {ok:false,before,actual:mapsSearchValue(),cards:selectCards().length,endReached:hasNoMoreResults(),routeMatches:canonical(utils.fromSearch(location.href))===canonical(desired),url:location.href};
-  }
-  async function restoreResultsPosition(position) {
-    const cards=selectCards(),scroller=getScrollTarget(cards);
-    if(!scroller)return {restored:false,top:window.scrollY,method:"no-results-panel"};
-    const target=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
-    let steps=0;
-    while(Math.abs(scroller.scrollTop-target)>70&&steps<60&&!stopped) {
-      const before=scroller.scrollTop,delta=Math.max(-420,Math.min(420,target-before));
-      await dispatchMapsWheel(scroller,delta);
-      steps++;
-      if(Math.abs(scroller.scrollTop-before)<2)break;
-    }
-    return {restored:Math.abs(scroller.scrollTop-target)<=100,top:scroller.scrollTop,target,steps,method:"mouse-wheel"};
-  }
-  function clickMapsBackControl() {
-    const candidates=[...document.querySelectorAll('button,[role="button"]')].filter(el=>{
-      if(el.closest("#glcsv-float"))return false;
-      const r=rect(el),label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""}`);
-      return r.width>0&&r.height>0&&r.top<180&&r.left<innerWidth*.62&&/(back|volver|atras|cerrar|close)/.test(label);
-    }).sort((a,b)=>{
-      const rank=el=>/(back|volver|atras)/.test(canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""}`))?0:1;
-      return rank(a)-rank(b)||rect(a).top-rect(b).top;
-    });
-    if(!candidates.length)return false;
-    candidates[0].click();
-    return true;
-  }
-  async function restoreSearchAfterRecovery(previousUrl,position,expectedQuery) {
-    const started=Date.now();
-    let backControlClicked=false;
-    if(/\/maps\/place\//i.test(location.pathname))history.back();
-    while(Date.now()-started<9000&&!stopped) {
-      if(!/\/maps\/place\//i.test(location.pathname)&&selectCards().length) {
-        const actualQuery=mapsSearchValue();
-        if(expectedQuery&&canonical(actualQuery)!==canonical(expectedQuery)) {
-          const searchResult=await submitMapsSearch(expectedQuery);
-          if(!searchResult.ok)return {ok:false,url:location.href,queryMismatch:true,actualQuery,expectedQuery,searchResult};
-          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true};
-        }
-        // Maps can return to its list at scrollTop=0 after history.back().
-        // Restore the pre-click position before searching farther down.
-        const first=await restoreResultsPosition(position);
-        await wait(260);
-        const second=await restoreResultsPosition(position);
-        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
-      }
-      if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
-      await wait(180);
-    }
-    return {ok:false,url:location.href};
-  }
-  async function recoverStalledResults(recoveryTried,inspected,expectedQuery) {
-    const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
-    if(hasNoMoreResults())return {recovered:false,endReached:initiallyFresh.length===0,newResults:initiallyFresh.length>0,attempted:recoveryTried.size};
-    const candidates=selectCards().filter(card=>inspected.has(card.key)&&card.businessUrl).reverse();
-    const attemptedNames=[];
-    for(const card of candidates) {
-      if(attemptedNames.length>=12)break;
-      if(stopped)return {recovered:false,stopped:true,attemptedNames};
-      if(recoveryTried.has(card.key)||!card.element?.isConnected)continue;
-      recoveryTried.add(card.key);
-      attemptedNames.push(card.name);
-      const previousUrl=location.href;
-      const previousPosition=captureResultsPosition();
-      if(!await clickCard(card,{requireMapsPlace:true}))continue;
-      const started=Date.now();
-      let opened=false,openedBy="";
-      while(Date.now()-started<2600&&!stopped) {
-        if(hasNoMoreResults()) {
-          const fresh=selectCards().filter(item=>!inspected.has(item.key));
-          return {recovered:false,endReached:fresh.length===0,newResults:fresh.length>0,card:card.name,attemptedNames};
-        }
-        const routeOpened=location.href!==previousUrl&&/\/maps\/place\//i.test(location.pathname);
-        if(routeOpened){opened=true;openedBy="place-url";break;}
-        if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;openedBy="business-title";break;}
-        await wait(160);
-      }
-      if(!opened)continue;
-      const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition,expectedQuery);
-      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored)};
-      return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url,queryMismatch:restored.queryMismatch,expectedQuery,actualQuery:restored.actualQuery};
-    }
-    return {recovered:false,attempted:recoveryTried.size,attemptedNames};
-  }
   const MAX_LOG_ENTRIES=200;
   const MAX_NO_PROGRESS=8;
   function logEvent(state,level,event,details={}) {
@@ -712,7 +591,7 @@
     const DETAIL_CONCURRENCY=within(Math.round(Number(detailConcurrency)||5),1,20), MAX_DETAIL_BACKLOG=Math.max(15,DETAIL_CONCURRENCY*3);
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
-    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, lastReloadRecoveryAt:Number(existing.lastReloadRecoveryAt)||0, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
     const snapshot=()=>({...state,rows:[...rows.values()].map(row=>({...row})),queryRows:queryRows.map(row=>({...row})),inspectedIds:[...inspected],pendingDetails:[...pendingDetails.values()].map(row=>({...row})),logs:[...(state.logs||[])]});
     const saveSnapshot=()=>{const copy=snapshot();persistChain=persistChain.catch(()=>{}).then(()=>writeState(copy));lastCheckpoint=Date.now();return persistChain;};
     const scheduleCheckpoint=(force=false)=>{
@@ -759,10 +638,11 @@
     let noProgress=0;
     let iterations=0;
     let endReached=false;
-    let emptyFeedRecoveryAttempts=0;
+    let reloadRequested=false;
+    let lastReloadCooldownLogAt=0;
+    let emptyFeedRecoveryAttempts=Number(existing.emptyFeedRecoveryAttempts)||0;
     let emptyFeedAdvance=false;
     const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
-    const recoveryTried=new Set();
     let finishReason="error";
     let wheelSessionStarted=false;
     try {
@@ -776,7 +656,7 @@
       while (!stopped && !endReached && (limit===0 || queryProcessed < limit)) {
         iterations++;
         const cards=selectCards();
-        if(cards.length)emptyFeedRecoveryAttempts=0;
+        if(cards.length) {emptyFeedRecoveryAttempts=0;state.emptyFeedRecoveryAttempts=0;}
         const pending=cards.filter(c=>!inspected.has(c.key));
         if(hasNoMoreResults()&&!pending.length){endReached=true;break;}
         let count=0;
@@ -858,81 +738,69 @@
         }
         noProgress=endReached?0:scroll.timedOut?MAX_NO_PROGRESS:
           (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
-        let recovery=null, recoveryScroll=null, recoveryCycles=0;
+        if(hasNew||count>0)state.lastReloadRecoveryAt=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
-          while(!stopped&&!endReached&&!hasNew) {
-            recoveryCycles++;
-            state.message=`Maps sigue cargando en esta ciudad. Probando fichas recientes (${recoveryCycles})…`;
-            showOverlay(state.message);
-            recovery=await recoverStalledResults(recoveryTried,inspected,expectedQuery);
-            if(recovery.endReached){endReached=true;break;}
-            if(recovery.newResults){hasNew=true;noProgress=0;break;}
-            if(recovery.restoreFailed) {
-              logEvent(state,"error","No se pudo volver a la lista tras abrir una ficha; se detiene la recuperación para evitar repetir tarjetas",{name:recovery.card,openedBy:recovery.openedBy,urlAfter:recovery.urlAfter,attemptedCards:recovery.attemptedNames});
-              throw new Error(`Se abrió «${recovery.card}», pero Maps no regresó a la lista de resultados.`);
+          if(!selectCards().length&&campaignId&&Number(state.lastReloadRecoveryAt)>0) {
+            emptyFeedRecoveryAttempts++;
+            state.emptyFeedRecoveryAttempts=emptyFeedRecoveryAttempts;
+            if(emptyFeedRecoveryAttempts>=2) {
+              emptyFeedAdvance=true;
+              noProgress=0;
+              state.message=`La lista de Maps no reapareció tras ${emptyFeedRecoveryAttempts} recargas. Guardé ${rows.size} fichas y la campaña seguirá con la próxima ciudad.`;
+              logEvent(state,"warn","La lista siguió vacía tras dos recargas; la campaña avanza sin declarar que Maps confirmó el fin",{
+                campaignId,campaignQuery,expectedQuery,emptyFeedRecoveryAttempts,rows:rows.size,
+                endMarkerConfirmed:false,pendingDetails:pendingDetails.size
+              });
+              await scheduleCheckpoint(true);
+              break;
             }
-            if(recovery.recovered) {
-              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal});
-              recoveryScroll=await scrollUntilNewResults(inspected);
-              hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
-              endReached=Boolean(recoveryScroll.endReached&&!hasNew);
-              if(endReached||hasNew){noProgress=0;break;}
+          }
+          const sinceReload=Date.now()-(Number(state.lastReloadRecoveryAt)||0);
+          const cooldownRemaining=Math.max(0,45000-sinceReload);
+          if(cooldownRemaining>0) {
+            state.message=`Maps sigue cargando. Mantengo esta búsqueda activa; podré recargarla de nuevo en ${Math.ceil(cooldownRemaining/1000)} s.`;
+            if(Date.now()-lastReloadCooldownLogAt>5000) {
+              logEvent(state,"warn","Recuperación por recarga en espera; se conserva la búsqueda y se sigue desplazando",{cooldownRemainingMs:cooldownRemaining,spinnerVisible:resultsSpinnerVisible(),rows:rows.size,inspected:inspected.size});
+              lastReloadCooldownLogAt=Date.now();
             }
-            if(!recovery.attemptedNames?.length) {
-              if(!selectCards().length) {
-                emptyFeedRecoveryAttempts++;
-                const actualQuery=mapsSearchValue();
-                const restoredSearch=await submitMapsSearch(expectedQuery);
-                const refreshed=selectCards();
-                hasNew=refreshed.some(c=>!inspected.has(c.key));
-                endReached=Boolean(restoredSearch.endReached&&!hasNew);
-                logEvent(state,restoredSearch.ok?"info":"warn",restoredSearch.ok?
-                  "Vista sin tarjetas: se restauró la búsqueda activa de Maps":
-                  "Vista sin tarjetas: se intentó restaurar la búsqueda activa",{
-                    expectedQuery,actualQuery,emptyFeedRecoveryAttempts,restoredSearch,
-                    refreshedCards:refreshed.length,hasUnseenCard:hasNew,endReached
-                  });
-                if(endReached||hasNew||refreshed.length) {noProgress=0;break;}
-                if(emptyFeedRecoveryAttempts>=2) {
-                  if(campaignId) {
-                    emptyFeedAdvance=true;
-                    logEvent(state,"warn","La lista no reapareció tras dos intentos; la campaña avanzará sin confirmar el fin de esta ciudad",{
-                      campaignId,campaignQuery,expectedQuery,emptyFeedRecoveryAttempts,rows:rows.size,
-                      endMarkerConfirmed:false,refreshedCards:refreshed.length
-                    });
-                    noProgress=0;
-                    break;
-                  }
-                  throw new Error(`Maps no volvió a mostrar resultados para «${expectedQuery}» tras dos intentos. Los resultados guardados siguen disponibles.`);
-                }
-                await wait(900);
-                noProgress=MAX_NO_PROGRESS;
-                await scheduleCheckpoint(true);
-                continue;
-              }
-              // Do not clear recoveryTried: that would send the recovery loop
-              // back to the first cards forever. Keep moving down the feed
-              // until Maps adds cards or shows its real end marker.
-              recoveryScroll=await scrollUntilNewResults(inspected,20);
-              hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
-              endReached=Boolean(recoveryScroll.endReached&&!hasNew);
-              if(endReached||hasNew){noProgress=0;break;}
-              await wait(900);
-            }
-            noProgress=MAX_NO_PROGRESS;
-            state.message=`Sigo en esta ciudad hasta que carguen fichas nuevas o Maps confirme “No hay más resultados”.`;
-            logEvent(state,"warn","La ciudad sigue activa; no se avanza sin resultados nuevos o el marcador de fin",{recoveryCycles,attemptedCards:recovery.attemptedNames,spinnerVisible:resultsSpinnerVisible(),scrollSteps:recoveryScroll?.scrollSteps||0});
+            noProgress=MAX_NO_PROGRESS-1;
+          } else {
+            const reloadUrl=location.href;
+            const reloadPosition=captureResultsPosition();
+            state.lastReloadRecoveryAt=Date.now();
+            state.message=`Maps quedó atascado. Guardando ${rows.size} fichas y recargando esta búsqueda para continuar…`;
+            logEvent(state,"warn","Maps atascado: checkpoint guardado; se recargará la misma búsqueda y se reanudará automáticamente",{
+              query:expectedQuery,url:reloadUrl,scrollTop:reloadPosition.top,rows:rows.size,inspected:inspected.size,
+              pendingDetails:pendingDetails.size,spinnerVisible:resultsSpinnerVisible(),campaignId:campaignId||undefined
+            });
             state.updatedAt=Date.now();
             await scheduleCheckpoint(true);
+            await flushCheckpoint();
+            reloadRequested=true;
+            chrome.runtime.sendMessage({type:"GLCSV_MAPS_RELOAD_RECOVERY",params:{
+              searchUrl:reloadUrl,expectedQuery,limit,country,parallelTabs:DETAIL_CONCURRENCY,
+              campaignId:campaignId||"",campaignQuery:campaignQuery||"",scrollTop:reloadPosition.top
+            }}).then(result=>{
+              if(!result?.ok)chrome.storage.local.get(STATE_KEY).then(stored=>{
+                const savedState=stored[STATE_KEY];
+                if(!savedState)return;
+                const logs=Array.isArray(savedState.logs)?savedState.logs:[];
+                logs.push({time:new Date().toISOString(),level:"error",event:"No se pudo recargar Maps para recuperar el feed",details:{error:result?.error||"Background rechazó la recuperación"}});
+                writeState({...savedState,status:"paused",message:`No se pudo recargar Google Maps automáticamente: ${result?.error||"error desconocido"}. Tus resultados quedaron guardados; puedes continuar.`,logs:logs.slice(-MAX_LOG_ENTRIES),updatedAt:Date.now()}).catch(()=>{});
+              }).catch(()=>{});
+            }).catch(error=>chrome.storage.local.get(STATE_KEY).then(stored=>{
+              const savedState=stored[STATE_KEY];
+              if(savedState)writeState({...savedState,status:"paused",message:`La recarga automática falló: ${String(error?.message||error)}. Tus resultados siguen guardados.`,updatedAt:Date.now()}).catch(()=>{});
+            }).catch(()=>{}));
+            return;
           }
         }
         if(emptyFeedAdvance)break;
         state.message=endReached?`Google Maps confirmó que no hay más resultados. ${rows.size} fichas guardadas.`:
           endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
-          recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,listResetRecovery,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,listResetRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
@@ -991,12 +859,14 @@
       state.updatedAt=Date.now();
       await flushCheckpoint().catch(()=>{});
       showOverlay(state.message);
-      if (ui?.stop) {ui.stop.disabled=true;ui.stop.textContent="Finalizado";}
-      setTimeout(hideOverlay,4500);
+      if(!reloadRequested) {
+        if (ui?.stop) {ui.stop.disabled=true;ui.stop.textContent="Finalizado";}
+        setTimeout(hideOverlay,4500);
+      }
       running=false;
       currentRun=null;
       stopped=false;
-      if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
+      if(campaignId&&!reloadRequested)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {

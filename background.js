@@ -3,7 +3,9 @@
 importScripts('data_utils.js');
 const CAMPAIGN_KEY='glcsv_campaign';
 const CAMPAIGN_LOG_KEY='glcsv_campaign_logs';
+const MAPS_RELOAD_KEY='glcsv_maps_reload_recovery';
 const debuggerWheelTabs=new Set();
+const reloadResumeTabs=new Set();
 
 chrome.debugger.onDetach.addListener(source=>{
   if(Number.isInteger(source.tabId))debuggerWheelTabs.delete(source.tabId);
@@ -140,6 +142,111 @@ function waitForTabComplete(tabId,timeoutMs=60000) {
     chrome.tabs.get(tabId).then(tab=>{if(tab.status==="complete")finish(null,tab);}).catch(error=>finish(error));
   });
 }
+
+async function resumeAfterMapsReload(tabId) {
+  if(reloadResumeTabs.has(tabId))return;
+  reloadResumeTabs.add(tabId);
+  try {
+    const stored=await chrome.storage.local.get([MAPS_RELOAD_KEY,CAMPAIGN_KEY,'glcsv_state']);
+    const marker=stored[MAPS_RELOAD_KEY];
+    if(!marker||marker.tabId!==tabId)return;
+    if(marker.resuming&&Date.now()-Number(marker.resumeStartedAt||0)<90000)return;
+    const state=stored.glcsv_state||{};
+    const campaign=stored[CAMPAIGN_KEY];
+    if(marker.campaignId) {
+      const activeItem=campaign?.queries?.[campaign.index];
+      if(campaign?.id!==marker.campaignId||campaign.status==='paused'||activeItem?.query!==marker.campaignQuery) {
+        await chrome.storage.local.remove(MAPS_RELOAD_KEY);
+        return;
+      }
+    } else if(state.status!=='running') {
+      await chrome.storage.local.remove(MAPS_RELOAD_KEY);
+      return;
+    }
+    await chrome.storage.local.set({[MAPS_RELOAD_KEY]:{...marker,resuming:true,resumeStartedAt:Date.now()}});
+    let tab=await chrome.tabs.get(tabId);
+    if(!supportedSearchUrl(tab.url||''))throw new Error('La pestaña recargada ya no está en una búsqueda de Google Maps.');
+    if(searchSourceKey(tab.url||'')!==marker.searchKey)
+      throw new Error('La búsqueda cambió durante la recarga; no inicié otra consulta para proteger el progreso.');
+
+    const expected=String(marker.expectedQuery||'').trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+    let ready=false,feedState=null;
+    const readyDeadline=Date.now()+45000;
+    while(Date.now()<readyDeadline) {
+      try {
+        const [result]=await chrome.scripting.executeScript({target:{tabId},func:()=>{
+          const input=document.querySelector('input#searchboxinput,input[role="combobox"]');
+          const query=String(input?.value||'').trim().toLocaleLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+          const cards=document.querySelectorAll('.VkpGBb,.Nv2PK,.THOPZb,div[role="article"],a.hfpxzc,.rllt__link,.dbg0pd').length;
+          const text=(document.querySelector('div[role="feed"]')||document.body)?.innerText||'';
+          const end=/no hay más resultados|no more results/i.test(text);
+          return {hasSearch:Boolean(input),query,cards,end};
+        }});
+        feedState=result?.result||null;
+        if(feedState?.hasSearch&&feedState.query===expected&&(feedState.cards>0||feedState.end)){ready=true;break;}
+        if(feedState?.hasSearch&&feedState.query&&feedState.query!==expected)
+          throw new Error(`Maps reabrió otra búsqueda («${feedState.query}»); se esperaba «${expected}».`);
+      } catch(error) {
+        if(String(error?.message||error).includes('se esperaba'))throw error;
+      }
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    if(!ready) {
+      if(!feedState?.hasSearch||feedState.query!==expected)
+        throw new Error('Maps no restauró el cuadro de búsqueda esperado después de 45 segundos.');
+      await appendBackgroundLog('warn','Maps recargó, pero todavía no mostró tarjetas ni el marcador final; se reanuda para que el escáner siga esperando',{
+        campaignId:marker.campaignId||undefined,query:marker.expectedQuery,feedState
+      });
+    }
+
+    tab=await chrome.tabs.get(tabId);
+    await chrome.scripting.executeScript({target:{tabId},files:['data_utils.js','content.js']});
+    const startMessage={
+      type:'GLCSV_START',limit:marker.limit??0,country:marker.country||'auto',
+      parallelTabs:marker.parallelTabs??5,searchUrl:tab.url||marker.searchUrl,tabId,
+      campaignId:marker.campaignId||'',campaignQuery:marker.campaignQuery||''
+    };
+    const result=await chrome.tabs.sendMessage(tabId,startMessage);
+    if(!result?.ok)throw new Error(result?.error||'El scraper no aceptó la reanudación después de recargar Maps.');
+    await chrome.storage.local.remove(MAPS_RELOAD_KEY);
+    if(marker.campaignId) {
+      const latest=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
+      if(latest?.id===marker.campaignId&&latest.status!=='paused')
+        await chrome.storage.local.set({[CAMPAIGN_KEY]:{...latest,tabId,status:'running',message:`Reanudando ${latest.queries[latest.index]?.label||'la búsqueda actual'} después de recuperar Maps…`,updatedAt:Date.now()}});
+    }
+    await appendBackgroundLog('info','Maps recargó y la extracción se reanudó automáticamente',{
+      campaignId:marker.campaignId||undefined,query:marker.expectedQuery,tabId,
+      preservedRows:state.rows?.length||0,alreadyInspected:state.inspectedIds?.length||0,
+      pendingDetails:state.pendingDetails?.length||0,scrollTopBeforeReload:marker.scrollTop
+    });
+  } catch(error) {
+    const message=String(error?.message||error);
+    await appendBackgroundLog('error','No se pudo reanudar automáticamente después de recargar Maps',{
+      tabId,error:message
+    }).catch(()=>{});
+    const stored=await chrome.storage.local.get([MAPS_RELOAD_KEY,CAMPAIGN_KEY,'glcsv_state']);
+    const marker=stored[MAPS_RELOAD_KEY];
+    if(marker?.tabId===tabId) {
+      await chrome.storage.local.remove(MAPS_RELOAD_KEY);
+      const state=stored.glcsv_state||{};
+      const logs=Array.isArray(state.logs)?state.logs:[];
+      logs.push({time:new Date().toISOString(),level:'error',event:'Reanudación automática tras recargar Maps falló',details:{error:message}});
+      await chrome.storage.local.set({glcsv_state:{...state,status:'paused',message:`Maps se recargó, pero el scraper no pudo reanudarse: ${message}. El progreso guardado sigue disponible.`,logs:logs.slice(-200),updatedAt:Date.now()}});
+      const campaign=stored[CAMPAIGN_KEY];
+      if(marker.campaignId&&campaign?.id===marker.campaignId&&campaign.status!=='paused')
+        await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:`La recuperación automática de Maps falló: ${message}. Puedes continuar desde el progreso guardado.`,updatedAt:Date.now()}});
+    }
+  } finally {
+    reloadResumeTabs.delete(tabId);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
+  if(changeInfo.status!=='complete')return;
+  chrome.storage.local.get(MAPS_RELOAD_KEY).then(stored=>{
+    if(stored[MAPS_RELOAD_KEY]?.tabId===tabId)resumeAfterMapsReload(tabId);
+  }).catch(()=>{});
+});
 
 async function enrichPlaceInWorkerTab(row) {
   const url=String(row?.businessUrl||'');
@@ -282,6 +389,9 @@ async function startCampaign(message) {
 }
 
 async function finishCampaignQuery(message) {
+  const pendingReload=(await chrome.storage.local.get(MAPS_RELOAD_KEY))[MAPS_RELOAD_KEY];
+  if(pendingReload?.campaignId===message.campaignId&&pendingReload.campaignQuery===message.campaignQuery)
+    return {ok:true,reloading:true};
   const campaign=(await chrome.storage.local.get(CAMPAIGN_KEY))[CAMPAIGN_KEY];
   if(!campaign||campaign.id!==message.campaignId||campaign.status==='paused'||campaign.status==='complete')return {ok:true,ignored:true};
   if(message.campaignQuery&&campaign.queries[campaign.index]?.query!==message.campaignQuery)return {ok:true,ignored:true,stale:true};
@@ -342,6 +452,43 @@ async function finishCampaignQuery(message) {
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...next,status:'paused',message:`Error al abrir ${next.queries[nextIndex].label}: ${error.message||error}. Podés continuar.`,updatedAt:Date.now()}});
     return {ok:false,error:String(error.message||error)};
   }
+}
+
+async function reloadMapsForRecovery(message,sender) {
+  const tabId=sender.tab?.id;
+  if(!Number.isInteger(tabId))throw new Error('No pude identificar la pestaña de Maps que se debe recuperar.');
+  const tab=await chrome.tabs.get(tabId);
+  if(!supportedSearchUrl(tab.url||''))throw new Error('La pestaña actual ya no muestra una búsqueda compatible de Google Maps.');
+  const params=message.params||{};
+  const searchUrl=String(params.searchUrl||tab.url||'');
+  if(searchSourceKey(searchUrl)!==searchSourceKey(tab.url||''))
+    throw new Error('La URL cambió antes de guardar la recarga; no se modificó la búsqueda.');
+  const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
+  const state=stored.glcsv_state||{};
+  const campaign=stored[CAMPAIGN_KEY];
+  if(params.campaignId) {
+    const activeItem=campaign?.queries?.[campaign.index];
+    if(campaign?.id!==params.campaignId||campaign.status==='paused'||activeItem?.query!==params.campaignQuery)
+      throw new Error('La campaña se pausó o cambió de ciudad antes de la recuperación.');
+  } else if(state.status!=='running'||state.tabId!==tabId) {
+    throw new Error('La extracción ya no está activa en esta pestaña.');
+  }
+  const marker={
+    tabId,searchUrl,searchKey:searchSourceKey(searchUrl),expectedQuery:String(params.expectedQuery||''),
+    limit:Math.max(0,Number(params.limit)||0),country:String(params.country||'auto'),
+    parallelTabs:Math.max(1,Math.min(20,Number(params.parallelTabs)||5)),
+    campaignId:String(params.campaignId||''),campaignQuery:String(params.campaignQuery||''),
+    scrollTop:Math.max(0,Number(params.scrollTop)||0),createdAt:Date.now(),resuming:false
+  };
+  await chrome.storage.local.set({[MAPS_RELOAD_KEY]:marker});
+  await appendBackgroundLog('warn','Recarga automática de Maps programada para destrabar el feed',{
+    campaignId:marker.campaignId||undefined,query:marker.expectedQuery,tabId,
+    rows:state.rows?.length||0,inspected:state.inspectedIds?.length||0,
+    pendingDetails:state.pendingDetails?.length||0,scrollTop:marker.scrollTop,url:searchUrl
+  });
+  await endMapsWheelSession({tab:{id:tabId}});
+  await chrome.tabs.reload(tabId,{bypassCache:false});
+  return {ok:true,reloading:true,tabId};
 }
 
 async function pauseCampaign() {
@@ -438,6 +585,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if(message?.type==='GLCSV_WHEEL_END') {
     endMapsWheelSession(sender).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if(message?.type==='GLCSV_MAPS_RELOAD_RECOVERY') {
+    reloadMapsForRecovery(message,sender).then(respond).catch(async error=>{
+      const messageText=String(error?.message||error);
+      await appendBackgroundLog('error','No se pudo programar la recuperación de Maps por recarga',{tabId:sender.tab?.id,error:messageText}).catch(()=>{});
+      respond({ok:false,error:messageText});
+    });
     return true;
   }
   if(message?.type==='GLCSV_ENRICH_DETAIL') {
