@@ -552,13 +552,37 @@
   }
   function resultsSpinnerVisible() {
     const scope=document.querySelector('div[role="feed"]')||getScrollTarget(selectCards())||document.body;
-    const selectors='[role="progressbar"],[aria-busy="true"],[aria-label*="cargando" i],[aria-label*="loading" i],[aria-label*="carregando" i]';
-    for(const el of scope.querySelectorAll(selectors)) {
+    const scrollTarget=getScrollTarget(selectCards())||scope;
+    const scrollRect=rect(scrollTarget);
+    const selectors='[role="progressbar"],[aria-busy="true"],[aria-label*="cargando" i],[aria-label*="loading" i],[aria-label*="carregando" i],[class*="spinner" i],[class*="loading" i],[class*="progress" i],[class*="busy" i]';
+    const candidates=[...scope.querySelectorAll(selectors)];
+    if(scope.matches?.(selectors))candidates.unshift(scope);
+    for(const el of candidates) {
       if(el.closest("#glcsv-float"))continue;
       const r=rect(el), style=getComputedStyle(el);
-      if(r.width>0&&r.height>0&&style.visibility!=="hidden"&&style.display!=="none")return true;
+      if(r.width<=0||r.height<=0||style.visibility==="hidden"||style.display==="none")continue;
+      const label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("role")||""} ${String(el.className?.baseVal||el.className||"")}`);
+      const authoritativeBusy=el.getAttribute("aria-busy")==="true"||el.getAttribute("role")==="progressbar";
+      if(authoritativeBusy)return true;
+      const explicitlyBusy=/(spinner|loading|progress|busy|cargando|carregando)/.test(label);
+      const inFeedFooter=r.bottom>=scrollRect.bottom-220||r.top>=scrollRect.top+scrollRect.height*.62;
+      if(explicitlyBusy&&inFeedFooter)return true;
     }
     return false;
+  }
+  function disableMapAutoUpdate() {
+    const labelPattern=/(?:actualizar resultados cuando se mueva el mapa|update results when the map moves|update results as the map moves|atualizar resultados quando o mapa se mover|atualizar resultados ao mover o mapa)/i;
+    const controls=[...document.querySelectorAll('input[type="checkbox"],[role="checkbox"]')];
+    for(const control of controls) {
+      const label=[control.getAttribute("aria-label"),control.getAttribute("title"),control.closest("label")?.innerText,
+        control.parentElement?.innerText,control.parentElement?.parentElement?.innerText].filter(Boolean).join(" ");
+      if(!labelPattern.test(label))continue;
+      const wasEnabled=control.matches('input[type="checkbox"]')?control.checked:control.getAttribute("aria-checked")==="true";
+      if(wasEnabled)control.click();
+      const isEnabled=control.matches('input[type="checkbox"]')?control.checked:control.getAttribute("aria-checked")==="true";
+      return {found:true,wasEnabled,disabled:!isEnabled,verified:!isEnabled,control:control.matches('input[type="checkbox"]')?"input":"role-checkbox"};
+    }
+    return {found:false,wasEnabled:null,disabled:false,verified:false};
   }
   async function waitForResultsOutcome(previousCount,timeout=10000) {
     // MutationObserver is not subject to the chained-timer throttling applied
@@ -657,14 +681,15 @@
         if(expectedQuery&&canonical(actualQuery)!==canonical(expectedQuery)) {
           const searchResult=await submitMapsSearch(expectedQuery);
           if(!searchResult.ok)return {ok:false,url:location.href,queryMismatch:true,actualQuery,expectedQuery,searchResult};
-          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true};
+          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true,mapAutoUpdate:disableMapAutoUpdate()};
         }
+        const mapAutoUpdate=disableMapAutoUpdate();
         // Maps can return to its list at scrollTop=0 after history.back().
         // Restore the pre-click position before searching farther down.
         const first=restoreResultsPosition(position);
         await waitForDomMutationOrWake(500);
         const second=restoreResultsPosition(position);
-        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
+        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl),mapAutoUpdate};
       }
       if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
       await waitForDomMutationOrWake(1200);
@@ -672,6 +697,7 @@
     return {ok:false,url:location.href};
   }
   async function recoverStalledResults(recoveryTried,inspected,expectedQuery) {
+    const mapAutoUpdateBeforeRecovery=disableMapAutoUpdate();
     const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
     if(hasNoMoreResults())return {recovered:false,endReached:initiallyFresh.length===0,newResults:initiallyFresh.length>0,attempted:recoveryTried.size};
     const candidates=selectCards().filter(card=>inspected.has(card.key)&&card.businessUrl).reverse();
@@ -699,7 +725,7 @@
       }
       if(!opened)continue;
       const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition,expectedQuery);
-      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored)};
+      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored),mapAutoUpdateBeforeRecovery,mapAutoUpdateAfterReturn:restored.mapAutoUpdate};
       return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url,queryMismatch:restored.queryMismatch,expectedQuery,actualQuery:restored.actualQuery};
     }
     return {recovered:false,attempted:recoveryTried.size,attemptedNames};
@@ -760,6 +786,7 @@
       else scheduleCheckpoint(true);
     };
     document.addEventListener("visibilitychange",onVisibilityChange);
+    const mapAutoUpdateAtStart=disableMapAutoUpdate();
     const mergeEnrichedRow=(base,detail)=>{
       const merged=combineRow(base,detail,country,searchUrl);
       const queryIndex=queryRows.findIndex(row=>(row.businessUrl&&row.businessUrl===merged.businessUrl)||utils.sameBusiness(row,base));
@@ -792,7 +819,11 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
+    if(mapAutoUpdateAtStart.found)logEvent(state,"info",mapAutoUpdateAtStart.disabled?
+      (mapAutoUpdateAtStart.wasEnabled?"Se desactivó “Actualizar resultados cuando se mueva el mapa” para fijar la lista":"La actualización de resultados al mover el mapa ya estaba desactivada"):
+      "No se pudo desactivar la actualización de resultados al mover el mapa",mapAutoUpdateAtStart);
+    else logEvent(state,"warn","No se encontró el control para fijar el área de resultados de Maps",{query:utils.fromSearch(searchUrl)});
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,mapAutoUpdate:mapAutoUpdateAtStart,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
@@ -889,12 +920,15 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        const hiddenSpinnerWake=Boolean(scroll.backgroundWake&&document.visibilityState==="hidden"&&scroll.loading&&!hasNew&&!endReached);
-        noProgress=endReached?0:hiddenSpinnerWake?MAX_NO_PROGRESS:
+        // The watchdog proves Maps has made no progress while the tab is hidden.
+        // Maps' spinner is not consistently exposed in the DOM, so do not make
+        // recovery depend on `scroll.loading` being true.
+        const hiddenNoProgressWake=Boolean(scroll.backgroundWake&&document.visibilityState==="hidden"&&!hasNew&&!endReached);
+        noProgress=endReached?0:hiddenNoProgressWake?MAX_NO_PROGRESS:
           (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
-        if(hiddenSpinnerWake)logEvent(state,"warn","Maps sigue mostrando el spinner en segundo plano; se inicia la recuperación desde las últimas fichas cargadas",{
+        if(hiddenNoProgressWake)logEvent(state,"warn","Maps no agregó fichas durante el pulso en segundo plano; se inicia la recuperación desde las últimas fichas cargadas",{
           campaignId:campaignId||undefined,campaignQuery:campaignQuery||undefined,rows:rows.size,
-          inspected:inspected.size,visibleCards:selectCards().length,scrollPosition:captureResultsPosition().top,
+          inspected:inspected.size,visibleCards:selectCards().length,spinnerVisible:scroll.loading,scrollPosition:captureResultsPosition().top,
           recoveryRule:"abrir fichas recientes desde la última hacia atrás y volver a desplazar"
         });
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
@@ -911,7 +945,7 @@
               throw new Error(`Se abrió «${recovery.card}», pero Maps no regresó a la lista de resultados.`);
             }
             if(recovery.recovered) {
-              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal});
+              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal,mapAutoUpdateBeforeRecovery:recovery.mapAutoUpdateBeforeRecovery,mapAutoUpdateAfterReturn:recovery.mapAutoUpdateAfterReturn});
               recoveryScroll=await scrollUntilNewResults(inspected);
               hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
               endReached=Boolean(recoveryScroll.endReached&&!hasNew);
