@@ -503,19 +503,6 @@
     const fresh=selectCards().filter(card=>!inspected.has(card.key));
     return {endReached:hasNoMoreResults()&&!fresh.length,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
   }
-  async function waitForStalledFeed(inspected,timeout=10000) {
-    const started=Date.now(),spinnerAtStart=resultsSpinnerVisible();
-    while(!stopped&&Date.now()-started<timeout) {
-      const fresh=selectCards().filter(card=>!inspected.has(card.key));
-      if(fresh.length)return {newResults:true,endReached:false,spinnerAtStart,spinnerVisible:resultsSpinnerVisible(),waitedMs:Date.now()-started,newCount:fresh.length};
-      if(hasNoMoreResults())return {newResults:false,endReached:true,spinnerAtStart,spinnerVisible:false,waitedMs:Date.now()-started,newCount:0};
-      const spinner=resultsSpinnerVisible();
-      if(spinnerAtStart&&!spinner)return {newResults:false,endReached:false,spinnerAtStart,spinnerVisible:false,spinnerCleared:true,waitedMs:Date.now()-started,newCount:0};
-      await wait(250);
-    }
-    const fresh=selectCards().filter(card=>!inspected.has(card.key));
-    return {newResults:fresh.length>0,endReached:hasNoMoreResults()&&!fresh.length,spinnerAtStart,spinnerVisible:resultsSpinnerVisible(),waitedMs:Date.now()-started,newCount:fresh.length,timeout:!stopped};
-  }
   async function restorePreviouslyLoadedResults(targetCount,maxSteps=80) {
     let steps=0,lastCount=selectCards().length;
     while(steps<maxSteps&&!stopped) {
@@ -690,7 +677,6 @@
     const canResume=existing.searchKey===key && Array.isArray(existing.rows);
     const sameCampaign=Boolean(campaignId&&existing.campaignId===campaignId&&Array.isArray(existing.rows));
     const sameCampaignQuery=sameCampaign&&existing.campaignQuery===campaignQuery;
-    let campaignStage=campaignId?(sameCampaignQuery&&existing.campaignStage==="enriching"?"enriching":"collecting"):"streaming";
     const saved=campaignId?(sameCampaign?existing.rows:[]):(canResume?existing.rows:[]);
     const rows=new Map();
     for(const row of utils.dedupeRows(saved))storeUniqueRow(rows,row,country,searchUrl);
@@ -710,7 +696,7 @@
     const DETAIL_CONCURRENCY=within(Math.round(Number(detailConcurrency)||5),1,20), MAX_DETAIL_BACKLOG=Math.max(15,DETAIL_CONCURRENCY*3);
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
-    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:6, ...(campaignId?{campaignId,campaignQuery,campaignStage}:{}), updatedAt:Date.now()};
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
     const snapshot=()=>({...state,rows:[...rows.values()].map(row=>({...row})),queryRows:queryRows.map(row=>({...row})),inspectedIds:[...inspected],pendingDetails:[...pendingDetails.values()].map(row=>({...row})),logs:[...(state.logs||[])]});
     const saveSnapshot=()=>{const copy=snapshot();persistChain=persistChain.catch(()=>{}).then(()=>writeState(copy));lastCheckpoint=Date.now();return persistChain;};
     const scheduleCheckpoint=(force=false)=>{
@@ -742,7 +728,7 @@
       })();
       activeDetailTasks.add(task);task.finally(()=>activeDetailTasks.delete(task));
     };
-    function pumpDetailQueue(){if(campaignId&&campaignStage==="collecting")return;while(!stopDetailQueue&&activeDetails<DETAIL_CONCURRENCY&&detailQueue.length)launchDetailTask(detailQueue.shift());}
+    function pumpDetailQueue(){while(!stopDetailQueue&&activeDetails<DETAIL_CONCURRENCY&&detailQueue.length)launchDetailTask(detailQueue.shift());}
     const enqueueDetail=base=>{
       if(!base?.businessUrl||pendingDetails.has(base.businessUrl))return;
       pendingDetails.set(base.businessUrl,base);state.pendingDetails=[...pendingDetails.values()];detailQueue.push(base);pumpDetailQueue();
@@ -751,17 +737,12 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId,campaignStage}: {})});
-    if(campaignId)logEvent(state,"info",campaignStage==="collecting"?
-      "Campaña etapa 1/2: cargar resultados hasta que Maps confirme el final; sin abrir pestañas de enriquecimiento":
-      "Campaña etapa 2/2: enriquecer las fichas guardadas antes de cambiar de ciudad",{
-        campaignId,campaignStage,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size
-      });
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
     let iterations=0;
-    let endReached=Boolean(campaignId&&sameCampaignQuery&&campaignStage==="enriching"&&existing.endReached);
+    let endReached=false;
     let emptyFeedRecoveryAttempts=0;
     let emptyFeedAdvance=false;
     const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
@@ -784,9 +765,9 @@
           inspected.add(card.key);
           const add=rowFromCard(card,country,searchUrl);
           if(add.businessUrl){
-            state.message=campaignId?`Resultado ${queryProcessed+1} guardado para enriquecer al final: ${card.name}`:`En cola ${activeDetails+detailQueue.length+1}: ${card.name}`;
+            state.message=`En cola ${activeDetails+detailQueue.length+1}: ${card.name}`;
             enqueueDetail(add);
-          }else if(!campaignId){
+          }else{
             state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
             showOverlay(state.message);
             const clicked=clickCard(card);
@@ -804,8 +785,6 @@
             if (detailWebsite) add.website=detailWebsite;
             if (detailCategory) add.category=detailCategory;
             }
-          }else{
-            logEvent(state,"warn","Ficha guardada con los datos visibles; Maps no expuso un enlace directo para enriquecerla en pestaña",{name:card.name});
           }
           const queryIndex=queryRows.findIndex(row=>utils.sameBusiness(row,add));
           const duplicateInQuery=queryIndex>=0;
@@ -822,7 +801,7 @@
           scheduleCheckpoint();
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
           count++;
-          if(!campaignId&&!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
+          if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
             while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
           if (!stopped&&!add.businessUrl) await wait(180);
         }
@@ -858,20 +837,6 @@
         }
         noProgress=endReached?0:(hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
-        let recoveryWait=null;
-        if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
-          state.message="Maps no agregó resultados; esperando hasta 10 segundos para que termine la carga…";
-          showOverlay(state.message);
-          recoveryWait=await waitForStalledFeed(inspected,10000);
-          hasNew=Boolean(recoveryWait.newResults||selectCards().some(card=>!inspected.has(card.key)));
-          endReached=Boolean(recoveryWait.endReached&&!hasNew);
-          logEvent(state,recoveryWait.endReached?"info":"warn",recoveryWait.endReached?
-            "Maps confirmó el final mientras se esperaba la carga":recoveryWait.newResults?
-            "Maps cargó fichas nuevas durante la espera":"Maps no avanzó durante 10 segundos; se probarán fichas anteriores",{
-              ...recoveryWait,hasUnseenCard:hasNew,scrollPosition:captureResultsPosition().top
-            });
-          if(hasNew||endReached)noProgress=0;
-        }
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           while(!stopped&&!endReached&&!hasNew) {
             recoveryCycles++;
@@ -945,26 +910,11 @@
           recovery?.recovered?`Ficha ${recovery.card} cargada; desplazando para continuar (${selectCards().length} visibles)…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recoveryWait,recovery,recoveryScroll,recoveryCycles,listResetRecovery,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,recovery,recoveryScroll,recoveryCycles,listResetRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
         showOverlay(state.message);
-      }
-      if(campaignId&&campaignStage==="collecting"&&!stopped&&(endReached||emptyFeedAdvance||(limit>0&&queryProcessed>=limit))) {
-        campaignStage="enriching";
-        state.campaignStage=campaignStage;
-        state.endReached=endReached;
-        state.message=`Recolección terminada: ${rows.size} fichas. Volviendo al inicio para enriquecer con ${DETAIL_CONCURRENCY} pestañas…`;
-        showOverlay(state.message);
-        await flushCheckpoint();
-        const topPosition=restoreResultsPosition({top:0});
-        logEvent(state,"info","Fin de recolección: Maps llegó al marcador final; comienza el enriquecimiento por lotes",{
-          campaignId,campaignQuery,rows:rows.size,pending:pendingDetails.size,detailTabs:DETAIL_CONCURRENCY,
-          endMarkerConfirmed:endReached,limitReached:limit>0&&queryProcessed>=limit,position:topPosition
-        });
-        await scheduleCheckpoint(true);
-        pumpDetailQueue();
       }
       if(stopped)await settleActiveDetails();else await drainDetailQueue();
       // Una campaña no cambia de ciudad ni deja fichas atrás: Maps ya confirmó
