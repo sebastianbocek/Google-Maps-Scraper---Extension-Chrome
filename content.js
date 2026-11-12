@@ -14,28 +14,7 @@
     titles: 'h1,h2,h3,[role="heading"],.DUwDvf,.qrShPb,.fontHeadlineLarge,.OSrXXb,.X7NTVe,span',
     phone: 'a[href^="tel:"], [data-item-id^="phone:tel:"], [aria-label*="teléfono" i], [aria-label*="telefone" i], [aria-label*="phone" i], [data-tooltip*="teléfono" i]'
   };
-  const backgroundWakeWaiters=new Set();
-  const wait = ms => new Promise(resolve=>{
-    let settled=false;
-    const finish=()=>{if(settled)return;settled=true;clearTimeout(timer);backgroundWakeWaiters.delete(wake);resolve();};
-    const wake=()=>finish();
-    const timer=setTimeout(finish,ms);
-    backgroundWakeWaiters.add(wake);
-  });
-  function waitForDomMutationOrWake(timeout=1200) {
-    return new Promise(resolve=>{
-      let settled=false;
-      const finish=reason=>{
-        if(settled)return;
-        settled=true;clearTimeout(timer);observer.disconnect();backgroundWakeWaiters.delete(wake);resolve(reason);
-      };
-      const observer=new MutationObserver(()=>finish("mutation"));
-      observer.observe(document.body||document.documentElement,{childList:true,subtree:true,characterData:true});
-      const timer=setTimeout(()=>finish("timeout"),timeout);
-      const wake=()=>finish("background-wake");
-      backgroundWakeWaiters.add(wake);
-    });
-  }
+  const wait = ms => new Promise(r => setTimeout(r, ms));
   const plain = s => String(s ?? "").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
   const canonical = s => plain(s).toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const safeText = el => plain(el?.innerText || el?.textContent || "");
@@ -338,23 +317,18 @@
     return null;
   }
   async function waitForPanel(name, timeout=4400) {
-    const ready=()=>{
-      const panel=findBusinessPanel(name);
-      return panel&&(phoneFromNode(panel)||externalWebsite(panel))?panel:null;
-    };
-    const initial=ready();
-    if(initial)return initial;
-    return new Promise(resolve=>{
-      let settled=false;
-      const finish=value=>{
-        if(settled)return;
-        settled=true;clearTimeout(timer);observer.disconnect();resolve(value||findBusinessPanel(name));
-      };
-      const observer=new MutationObserver(()=>{if(stopped){finish(null);return;}const panel=ready();if(panel)finish(panel);});
-      observer.observe(document.body||document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-label","data-item-id"]});
-      const timer=setTimeout(()=>finish(null),timeout);
-      if(stopped)finish(null);else {const panel=ready();if(panel)finish(panel);}
-    });
+    const begin = Date.now();
+    let panel = null;
+    while (!stopped && Date.now()-begin < timeout) {
+      panel = findBusinessPanel(name);
+      // Panel puede existir mientras todavía cambia el teléfono/web.
+      if (panel && (phoneFromNode(panel) || externalWebsite(panel))) {
+        await wait(280);
+        return findBusinessPanel(name) || panel;
+      }
+      await wait(190);
+    }
+    return panel;
   }
   async function extractPlaceDetails(baseRow) {
     const started=Date.now();
@@ -362,11 +336,11 @@
     while(Date.now()-started<9000) {
       title=document.querySelector('h1.DUwDvf, h1[role="heading"], h1');
       if(title&&safeText(title))break;
-      await waitForDomMutationOrWake(1200);
+      await wait(180);
     }
     // The worker visits a public Maps place URL in its own inactive tab. Read
     // the rendered page DOM; do not call undocumented Maps endpoints.
-    await waitForDomMutationOrWake(350);
+    await wait(260);
     let scope=null, bestScore=-1;
     for(let node=title,d=0;node&&node!==document.body&&d<14;node=node.parentElement,d++) {
       const textLength=(node.innerText||"").length;
@@ -552,63 +526,25 @@
   }
   function resultsSpinnerVisible() {
     const scope=document.querySelector('div[role="feed"]')||getScrollTarget(selectCards())||document.body;
-    const scrollTarget=getScrollTarget(selectCards())||scope;
-    const scrollRect=rect(scrollTarget);
-    const selectors='[role="progressbar"],[aria-busy="true"],[aria-label*="cargando" i],[aria-label*="loading" i],[aria-label*="carregando" i],[class*="spinner" i],[class*="loading" i],[class*="progress" i],[class*="busy" i]';
-    const candidates=[...scope.querySelectorAll(selectors)];
-    if(scope.matches?.(selectors))candidates.unshift(scope);
-    for(const el of candidates) {
+    const selectors='[role="progressbar"],[aria-busy="true"],[aria-label*="cargando" i],[aria-label*="loading" i],[aria-label*="carregando" i]';
+    for(const el of scope.querySelectorAll(selectors)) {
       if(el.closest("#glcsv-float"))continue;
       const r=rect(el), style=getComputedStyle(el);
-      if(r.width<=0||r.height<=0||style.visibility==="hidden"||style.display==="none")continue;
-      const label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("role")||""} ${String(el.className?.baseVal||el.className||"")}`);
-      const authoritativeBusy=el.getAttribute("aria-busy")==="true"||el.getAttribute("role")==="progressbar";
-      if(authoritativeBusy)return true;
-      const explicitlyBusy=/(spinner|loading|progress|busy|cargando|carregando)/.test(label);
-      const inFeedFooter=r.bottom>=scrollRect.bottom-220||r.top>=scrollRect.top+scrollRect.height*.62;
-      if(explicitlyBusy&&inFeedFooter)return true;
+      if(r.width>0&&r.height>0&&style.visibility!=="hidden"&&style.display!=="none")return true;
     }
     return false;
   }
-  function disableMapAutoUpdate() {
-    const labelPattern=/(?:actualizar resultados cuando se mueva el mapa|update results when the map moves|update results as the map moves|atualizar resultados quando o mapa se mover|atualizar resultados ao mover o mapa)/i;
-    const controls=[...document.querySelectorAll('input[type="checkbox"],[role="checkbox"]')];
-    for(const control of controls) {
-      const label=[control.getAttribute("aria-label"),control.getAttribute("title"),control.closest("label")?.innerText,
-        control.parentElement?.innerText,control.parentElement?.parentElement?.innerText].filter(Boolean).join(" ");
-      if(!labelPattern.test(label))continue;
-      const wasEnabled=control.matches('input[type="checkbox"]')?control.checked:control.getAttribute("aria-checked")==="true";
-      if(wasEnabled)control.click();
-      const isEnabled=control.matches('input[type="checkbox"]')?control.checked:control.getAttribute("aria-checked")==="true";
-      return {found:true,wasEnabled,disabled:!isEnabled,verified:!isEnabled,control:control.matches('input[type="checkbox"]')?"input":"role-checkbox"};
-    }
-    return {found:false,wasEnabled:null,disabled:false,verified:false};
-  }
   async function waitForResultsOutcome(previousCount,timeout=10000) {
-    // MutationObserver is not subject to the chained-timer throttling applied
-    // to hidden tabs. Use a timer only as a bounded fallback if Maps is idle.
-    const root=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||document.body||document.documentElement;
-    return new Promise(resolve=>{
-      let settled=false,quietTimer=null;
-      const finish=result=>{
-        if(settled)return;
-        settled=true;clearTimeout(hardTimer);clearTimeout(quietTimer);observer.disconnect();backgroundWakeWaiters.delete(onBackgroundWake);resolve(result);
-      };
-      const onBackgroundWake=()=>finish({endReached:hasNoMoreResults(),loading:resultsSpinnerVisible(),cardsAfter:selectCards().length,backgroundWake:true});
-      const check=()=>{
-        if(stopped){finish({endReached:false,loading:resultsSpinnerVisible(),stopped:true});return;}
-        if(hasNoMoreResults()){finish({endReached:true,loading:false});return;}
-        const count=selectCards().length;
-        if(count>previousCount){finish({endReached:false,loading:resultsSpinnerVisible(),cardsAfter:count});return;}
-        if(resultsSpinnerVisible()){clearTimeout(quietTimer);quietTimer=null;}
-        else if(!quietTimer)quietTimer=setTimeout(()=>finish({endReached:false,loading:false,cardsAfter:selectCards().length}),1100);
-      };
-      const observer=new MutationObserver(check);
-      observer.observe(root,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:["aria-busy","aria-label","class","style"]});
-      const hardTimer=setTimeout(()=>finish({endReached:hasNoMoreResults(),loading:resultsSpinnerVisible(),cardsAfter:selectCards().length,timeout:true}),timeout);
-      backgroundWakeWaiters.add(onBackgroundWake);
-      check();
-    });
+    const started=Date.now();
+    let stableSince=Date.now();
+    while(Date.now()-started<timeout) {
+      if(hasNoMoreResults())return {endReached:true,loading:false};
+      if(selectCards().length>previousCount)return {endReached:false,loading:resultsSpinnerVisible()};
+      if(resultsSpinnerVisible())stableSince=Date.now();
+      else if(Date.now()-stableSince>=1100)return {endReached:false,loading:false};
+      await wait(250);
+    }
+    return {endReached:hasNoMoreResults(),loading:resultsSpinnerVisible()};
   }
   function cardDetailHeadingVisible(name) {
     const target=canonical(name);
@@ -643,7 +579,7 @@
       const cards=selectCards();
       const routeMatches=canonical(utils.fromSearch(location.href))===canonical(desired);
       if(routeMatches&&(cards.length||hasNoMoreResults()))return {ok:true,before,actual:mapsSearchValue(),cards:cards.length,endReached:hasNoMoreResults(),routeMatches,url:location.href};
-      await waitForDomMutationOrWake(1200);
+      await wait(250);
     }
     return {ok:false,before,actual:mapsSearchValue(),cards:selectCards().length,endReached:hasNoMoreResults(),routeMatches:canonical(utils.fromSearch(location.href))===canonical(desired),url:location.href};
   }
@@ -681,23 +617,21 @@
         if(expectedQuery&&canonical(actualQuery)!==canonical(expectedQuery)) {
           const searchResult=await submitMapsSearch(expectedQuery);
           if(!searchResult.ok)return {ok:false,url:location.href,queryMismatch:true,actualQuery,expectedQuery,searchResult};
-          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true,mapAutoUpdate:disableMapAutoUpdate()};
+          if(searchResult.endReached||selectCards().length)return {ok:true,queryRestored:true,searchResult,position:{restored:false,reason:"new-search"},positionAfterRender:{restored:false,reason:"new-search"},url:location.href,searchMatchesOriginal:true};
         }
-        const mapAutoUpdate=disableMapAutoUpdate();
         // Maps can return to its list at scrollTop=0 after history.back().
         // Restore the pre-click position before searching farther down.
         const first=restoreResultsPosition(position);
-        await waitForDomMutationOrWake(500);
+        await wait(260);
         const second=restoreResultsPosition(position);
-        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl),mapAutoUpdate};
+        return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
       }
       if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
-      await waitForDomMutationOrWake(1200);
+      await wait(180);
     }
     return {ok:false,url:location.href};
   }
   async function recoverStalledResults(recoveryTried,inspected,expectedQuery) {
-    const mapAutoUpdateBeforeRecovery=disableMapAutoUpdate();
     const initiallyFresh=selectCards().filter(card=>!inspected.has(card.key));
     if(hasNoMoreResults())return {recovered:false,endReached:initiallyFresh.length===0,newResults:initiallyFresh.length>0,attempted:recoveryTried.size};
     const candidates=selectCards().filter(card=>inspected.has(card.key)&&card.businessUrl).reverse();
@@ -721,11 +655,11 @@
         const routeOpened=location.href!==previousUrl&&/\/maps\/place\//i.test(location.pathname);
         if(routeOpened){opened=true;openedBy="place-url";break;}
         if(findBusinessPanel(card.name)||cardDetailHeadingVisible(card.name)){opened=true;openedBy="business-title";break;}
-        await waitForDomMutationOrWake(1200);
+        await wait(160);
       }
       if(!opened)continue;
       const restored=await restoreSearchAfterRecovery(previousUrl,previousPosition,expectedQuery);
-      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored),mapAutoUpdateBeforeRecovery,mapAutoUpdateAfterReturn:restored.mapAutoUpdate};
+      if(restored.ok)return {recovered:true,card:card.name,openedBy,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,positionAfter:restored.positionAfterRender,urlAfter:restored.url,searchMatchesOriginal:restored.searchMatchesOriginal,queryRestored:Boolean(restored.queryRestored)};
       return {recovered:false,card:card.name,openedBy,restoreFailed:true,attempted:recoveryTried.size,attemptedNames,positionBefore:previousPosition,urlAfter:restored.url,queryMismatch:restored.queryMismatch,expectedQuery,actualQuery:restored.actualQuery};
     }
     return {recovered:false,attempted:recoveryTried.size,attemptedNames};
@@ -771,22 +705,6 @@
       return persistChain;
     };
     const flushCheckpoint=async()=>{if(writesSinceCheckpoint){writesSinceCheckpoint=0;await saveSnapshot();}else await persistChain;};
-    let lastVisibility=document.visibilityState;
-    const onVisibilityChange=()=>{
-      const visibility=document.visibilityState||"unknown";
-      if(visibility===lastVisibility)return;
-      lastVisibility=visibility;
-      logEvent(state,"info",visibility==="hidden"?
-        "Maps quedó en segundo plano; la extracción continúa y el progreso se guarda":
-        "Maps volvió al primer plano; la extracción continúa desde el mismo punto",{
-          tabId,visibility,rows:rows.size,inspected:inspected.size,pendingDetails:pendingDetails.size
-        });
-      state.updatedAt=Date.now();
-      if(visibility==="hidden")saveSnapshot().catch(()=>{});
-      else scheduleCheckpoint(true);
-    };
-    document.addEventListener("visibilitychange",onVisibilityChange);
-    const mapAutoUpdateAtStart=disableMapAutoUpdate();
     const mergeEnrichedRow=(base,detail)=>{
       const merged=combineRow(base,detail,country,searchUrl);
       const queryIndex=queryRows.findIndex(row=>(row.businessUrl&&row.businessUrl===merged.businessUrl)||utils.sameBusiness(row,base));
@@ -819,11 +737,7 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    if(mapAutoUpdateAtStart.found)logEvent(state,"info",mapAutoUpdateAtStart.disabled?
-      (mapAutoUpdateAtStart.wasEnabled?"Se desactivó “Actualizar resultados cuando se mueva el mapa” para fijar la lista":"La actualización de resultados al mover el mapa ya estaba desactivada"):
-      "No se pudo desactivar la actualización de resultados al mover el mapa",mapAutoUpdateAtStart);
-    else logEvent(state,"warn","No se encontró el control para fijar el área de resultados de Maps",{query:utils.fromSearch(searchUrl)});
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,mapAutoUpdate:mapAutoUpdateAtStart,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
@@ -889,6 +803,7 @@
           count++;
           if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
             while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
+          if (!stopped&&!add.businessUrl) await wait(180);
         }
         if (stopped || (limit>0 && queryProcessed>=limit)) break;
         state.message=`Buscando más resultados... (${rows.size} guardados)`;
@@ -920,17 +835,7 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        // The watchdog proves Maps has made no progress while the tab is hidden.
-        // Maps' spinner is not consistently exposed in the DOM, so do not make
-        // recovery depend on `scroll.loading` being true.
-        const hiddenNoProgressWake=Boolean(scroll.backgroundWake&&document.visibilityState==="hidden"&&!hasNew&&!endReached);
-        noProgress=endReached?0:hiddenNoProgressWake?MAX_NO_PROGRESS:
-          (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
-        if(hiddenNoProgressWake)logEvent(state,"warn","Maps no agregó fichas durante el pulso en segundo plano; se inicia la recuperación desde las últimas fichas cargadas",{
-          campaignId:campaignId||undefined,campaignQuery:campaignQuery||undefined,rows:rows.size,
-          inspected:inspected.size,visibleCards:selectCards().length,spinnerVisible:scroll.loading,scrollPosition:captureResultsPosition().top,
-          recoveryRule:"abrir fichas recientes desde la última hacia atrás y volver a desplazar"
-        });
+        noProgress=endReached?0:(hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           while(!stopped&&!endReached&&!hasNew) {
@@ -945,7 +850,7 @@
               throw new Error(`Se abrió «${recovery.card}», pero Maps no regresó a la lista de resultados.`);
             }
             if(recovery.recovered) {
-              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal,mapAutoUpdateBeforeRecovery:recovery.mapAutoUpdateBeforeRecovery,mapAutoUpdateAfterReturn:recovery.mapAutoUpdateAfterReturn});
+              logEvent(state,"warn","Ficha reciente abierta; retomando el scroll desde la posición anterior",{name:recovery.card,openedBy:recovery.openedBy,attemptedCards:recovery.attemptedNames,positionBefore:recovery.positionBefore,positionAfter:recovery.positionAfter,urlAfter:recovery.urlAfter,searchMatchesOriginal:recovery.searchMatchesOriginal});
               recoveryScroll=await scrollUntilNewResults(inspected);
               hasNew=Boolean(recoveryScroll.newResults||selectCards().some(c=>!inspected.has(c.key)));
               endReached=Boolean(recoveryScroll.endReached&&!hasNew);
@@ -1059,23 +964,17 @@
       state.pendingDetails=[...pendingDetails.values()];
       state.updatedAt=Date.now();
       await flushCheckpoint().catch(()=>{});
-      document.removeEventListener("visibilitychange",onVisibilityChange);
       showOverlay(state.message);
       if (ui?.stop) {ui.stop.disabled=true;ui.stop.textContent="Finalizado";}
       setTimeout(hideOverlay,4500);
       running=false;
       currentRun=null;
       stopped=false;
-      chrome.runtime.sendMessage({type:"GLCSV_SCAN_FINISHED",campaignId:campaignId||"",status:state.status}).catch(()=>{});
       if(campaignId)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {
-    if(message?.type==="GLCSV_BACKGROUND_TICK"){
-      for(const wake of [...backgroundWakeWaiters])wake();
-      sendResponse({ok:true,running,visibility:document.visibilityState||"unknown"});
-      return false;
-    } else if(message?.type==="GLCSV_DETAIL_EXTRACT"){
+    if(message?.type==="GLCSV_DETAIL_EXTRACT"){
       extractPlaceDetails(message.row||{}).then(row=>sendResponse({ok:true,row})).catch(error=>sendResponse({ok:false,error:String(error?.message||error)}));
       return true;
     } else if (message?.type==="GLCSV_START") {
