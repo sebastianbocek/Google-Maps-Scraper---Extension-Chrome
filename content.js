@@ -480,17 +480,29 @@
     if(!response?.ok)throw new Error(response?.error||"Chrome no pudo enviar la rueda al panel de resultados.");
     return {x,y,deltas:response.deltas,totalDeltaY:response.totalDeltaY};
   }
+  function inspectResultsOutcome(scroller,before) {
+    if(hasNoMoreResults())return {endReached:true,newResults:false,feedChanged:false,loading:resultsSpinnerVisible()};
+    const current=resultsSnapshot(scroller);
+    const newResults=current.count>before.count||current.keys!==before.keys;
+    const heightChanged=current.height!==before.height;
+    return {endReached:false,newResults,feedChanged:newResults||heightChanged,heightChanged,loading:resultsSpinnerVisible()};
+  }
   async function advanceResults(cards) {
     const scroller=getScrollTarget(cards);
     if(!scroller)return {moved:false,method:"no-results-panel",topBefore:0,topAfter:0,cardsBefore:selectCards().length,cardsAfter:selectCards().length,timedOut:true,wheelError:"No se encontró el panel desplazable de resultados."};
     const before=resultsSnapshot(scroller),old=before.top,maxTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
     const target=`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`;
     // A brief three-notch burst moves about a screen and a half, then Maps
-    // gets the full result-wait window before another burst is sent.
+    // gets a long wait only when its loading spinner is actually detected.
     const wheel=await dispatchMapsWheel(scroller,[300,340,380]);
-    const outcome=await waitForResultsOutcome(scroller,before,10000);
+    await wait(120);
+    let outcome=inspectResultsOutcome(scroller,before);
+    const spinnerDetected=Boolean(outcome.loading);
+    if(spinnerDetected&&!outcome.endReached&&!outcome.feedChanged) {
+      outcome={...await waitForResultsOutcome(scroller,before,10000),spinnerWaited:true};
+    }
     const after=resultsSnapshot(scroller);
-    return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,...outcome};
+    return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,spinnerDetected,...outcome};
   }
   async function scrollUntilNewResults(inspected,maxSteps=20) {
     for(let step=1;step<=maxSteps&&!stopped;step++) {
@@ -542,14 +554,11 @@
   async function waitForResultsOutcome(scroller,before,timeout=10000) {
     const started=Date.now();
     while(Date.now()-started<timeout) {
-      if(hasNoMoreResults())return {endReached:true,newResults:false,feedChanged:false,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started};
-      const current=resultsSnapshot(scroller);
-      const newResults=current.count>before.count||current.keys!==before.keys;
-      const heightChanged=current.height!==before.height;
-      if(newResults||heightChanged)return {endReached:false,newResults,feedChanged:true,heightChanged,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started};
+      const outcome=inspectResultsOutcome(scroller,before);
+      if(outcome.endReached||outcome.feedChanged)return {...outcome,waitedMs:Date.now()-started};
       await wait(250);
     }
-    return {endReached:hasNoMoreResults(),newResults:false,feedChanged:false,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started,timedOut:true};
+    return {...inspectResultsOutcome(scroller,before),waitedMs:Date.now()-started,timedOut:true};
   }
   function cardDetailHeadingVisible(name) {
     const target=canonical(name);
