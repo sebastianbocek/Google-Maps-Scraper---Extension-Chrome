@@ -3,6 +3,52 @@
 importScripts('data_utils.js');
 const CAMPAIGN_KEY='glcsv_campaign';
 const CAMPAIGN_LOG_KEY='glcsv_campaign_logs';
+const debuggerWheelTabs=new Set();
+
+chrome.debugger.onDetach.addListener(source=>{
+  if(Number.isInteger(source.tabId))debuggerWheelTabs.delete(source.tabId);
+});
+chrome.tabs.onRemoved.addListener(tabId=>{
+  if(!debuggerWheelTabs.has(tabId))return;
+  debuggerWheelTabs.delete(tabId);
+  chrome.debugger.detach({tabId}).catch(()=>{});
+});
+
+async function beginMapsWheelSession(sender) {
+  const tabId=sender.tab?.id;
+  if(!Number.isInteger(tabId))throw new Error('No pude identificar la pestaña de Google Maps para iniciar el scroll.');
+  const tab=await chrome.tabs.get(tabId);
+  const parsed=new URL(tab.url||sender.tab.url||'');
+  const localSearch=parsed.pathname==='/search'&&['local','lcl'].includes(parsed.searchParams.get('udm')||parsed.searchParams.get('tbm'));
+  if(!/(^|\.)google\.[a-z.]+$/i.test(parsed.hostname)||(!parsed.pathname.startsWith('/maps')&&!localSearch))
+    throw new Error('El scroll con rueda solo se habilita en la pestaña de resultados de Google Maps.');
+  if(debuggerWheelTabs.has(tabId))return {ok:true,alreadyAttached:true};
+  await chrome.debugger.attach({tabId},'1.3');
+  debuggerWheelTabs.add(tabId);
+  return {ok:true,tabId};
+}
+
+async function dispatchMapsWheel(message,sender) {
+  const tabId=sender.tab?.id;
+  if(!Number.isInteger(tabId)||!debuggerWheelTabs.has(tabId))
+    throw new Error('La sesión de rueda de Google Maps no está activa.');
+  const x=Number(message.x),y=Number(message.y),deltaY=Number(message.deltaY);
+  const tab=await chrome.tabs.get(tabId);
+  if(![x,y,deltaY].every(Number.isFinite)||deltaY===0||x<0||y<0||x>(tab.width||10000)||y>(tab.height||10000))
+    throw new Error('Las coordenadas o el desplazamiento de la rueda no son válidos.');
+  await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{
+    type:'mouseWheel',x,y,deltaX:0,deltaY:Math.max(-500,Math.min(500,deltaY)),pointerType:'mouse'
+  });
+  return {ok:true,x,y,deltaY};
+}
+
+async function endMapsWheelSession(sender) {
+  const tabId=sender.tab?.id;
+  if(!Number.isInteger(tabId)||!debuggerWheelTabs.has(tabId))return {ok:true,alreadyDetached:true};
+  debuggerWheelTabs.delete(tabId);
+  await chrome.debugger.detach({tabId}).catch(()=>{});
+  return {ok:true,tabId};
+}
 
 async function pauseInterruptedWork(reason) {
   const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
@@ -375,6 +421,18 @@ async function stopSavedSearch() {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
+  if(message?.type==='GLCSV_WHEEL_BEGIN') {
+    beginMapsWheelSession(sender).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if(message?.type==='GLCSV_WHEEL') {
+    dispatchMapsWheel(message,sender).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
+  if(message?.type==='GLCSV_WHEEL_END') {
+    endMapsWheelSession(sender).then(respond).catch(error=>respond({ok:false,error:String(error?.message||error)}));
+    return true;
+  }
   if(message?.type==='GLCSV_ENRICH_DETAIL') {
     enrichPlaceInWorkerTab(message.row).then(row=>respond({ok:true,row})).catch(async error=>{
       const messageText=String(error?.message||error);

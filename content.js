@@ -371,7 +371,7 @@
       businessUrl:baseRow.businessUrl||location.href
     };
   }
-  function clickCard(card,{requireMapsPlace=false}={}) {
+  async function clickCard(card,{requireMapsPlace=false}={}) {
     const root = card.element;
     if (!root?.isConnected) return false;
     try {
@@ -385,7 +385,6 @@
       let target = placeLink || root.querySelector(".dbg0pd, .fontHeadlineSmall, .qBF1Pd") || (!requireMapsPlace?root:null);
       if(!target)return false;
       if (target.closest("#glcsv-float")) return false;
-      target.scrollIntoView({behavior:"instant",block:"nearest",inline:"nearest"});
       target.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,cancelable:true,view:window}));
       target.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
       target.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
@@ -466,28 +465,30 @@
       });
     return candidates[0]||null;
   }
+  function resultsSnapshot(scroller) {
+    const cards=selectCards();
+    return {count:cards.length,keys:cards.map(card=>card.key).join("\u001f"),height:scroller?.scrollHeight||0,top:scroller?.scrollTop||0};
+  }
+  async function dispatchMapsWheel(scroller,deltaY) {
+    if(!scroller?.isConnected)throw new Error("No se encontró el panel desplazable de resultados de Google Maps.");
+    const bounds=rect(scroller);
+    if(bounds.width<100||bounds.height<120)throw new Error("El panel de resultados no tiene un área visible para enviar la rueda.");
+    const x=Math.round(Math.max(bounds.left+8,Math.min(bounds.right-8,bounds.left+Math.min(100,bounds.width*.32))));
+    const y=Math.round(Math.max(bounds.top+8,Math.min(bounds.bottom-8,bounds.top+bounds.height*.68)));
+    const response=await chrome.runtime.sendMessage({type:"GLCSV_WHEEL",x,y,deltaY});
+    if(!response?.ok)throw new Error(response?.error||"Chrome no pudo enviar la rueda al panel de resultados.");
+    await wait(240);
+    return {x,y,deltaY:response.deltaY};
+  }
   async function advanceResults(cards) {
     const scroller=getScrollTarget(cards);
-    const beforeCount=selectCards().length;
-    if (scroller) {
-      const old=scroller.scrollTop;
-      const maxTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
-      const step=Math.max(520,Math.floor(scroller.clientHeight*.82));
-      scroller.scrollTop=Math.min(maxTop,old+step);
-      scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
-      if(scroller.scrollTop===old) cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
-      const outcome=await waitForResultsOutcome(beforeCount,2500);
-      const afterCount=selectCards().length;
-      const after=scroller.scrollTop;
-      return {moved:after!==old||afterCount>beforeCount,method:"container",target:`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`,topBefore:old,topAfter:after,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:beforeCount,cardsAfter:afterCount,...outcome};
-    }
-    const old=window.scrollY;
-    const step=Math.max(520,window.innerHeight*.78);
-    cards.at(-1)?.element?.dispatchEvent(new WheelEvent("wheel",{bubbles:true,cancelable:true,view:window,deltaY:step}));
-    window.scrollBy({top:step,behavior:"instant"});
-    const outcome=await waitForResultsOutcome(beforeCount,2500);
-    const afterCount=selectCards().length;
-    return {moved:window.scrollY!==old||afterCount>beforeCount,method:"window-fallback",topBefore:old,topAfter:window.scrollY,cardsBefore:beforeCount,cardsAfter:afterCount,...outcome};
+    if(!scroller)return {moved:false,method:"no-results-panel",topBefore:0,topAfter:0,cardsBefore:selectCards().length,cardsAfter:selectCards().length,timedOut:true,wheelError:"No se encontró el panel desplazable de resultados."};
+    const before=resultsSnapshot(scroller),old=before.top,maxTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
+    const target=`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`;
+    const wheel=await dispatchMapsWheel(scroller,220);
+    const outcome=await waitForResultsOutcome(scroller,before,10000);
+    const after=resultsSnapshot(scroller);
+    return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,...outcome};
   }
   async function scrollUntilNewResults(inspected,maxSteps=20) {
     for(let step=1;step<=maxSteps&&!stopped;step++) {
@@ -499,6 +500,7 @@
       fresh=selectCards().filter(card=>!inspected.has(card.key));
       if(outcome.endReached||hasNoMoreResults())return {endReached:fresh.length===0,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:step,...outcome};
       if(fresh.length)return {endReached:false,newResults:true,newCount:fresh.length,scrollSteps:step,...outcome};
+      if(outcome.timedOut)return {endReached:false,newResults:false,newCount:0,scrollSteps:step,stalled:true,...outcome};
     }
     const fresh=selectCards().filter(card=>!inspected.has(card.key));
     return {endReached:hasNoMoreResults()&&!fresh.length,newResults:fresh.length>0,newCount:fresh.length,scrollSteps:maxSteps,loading:resultsSpinnerVisible()};
@@ -509,10 +511,11 @@
       const cards=selectCards();
       if(cards.length>=targetCount)return {restored:true,steps,cards:cards.length,targetCount};
       if(hasNoMoreResults())return {restored:false,endReached:true,steps,cards:cards.length,targetCount};
-      await advanceResults(cards);
+      const scroll=await advanceResults(cards);
       steps++;
       const currentCount=selectCards().length;
       if(currentCount>lastCount)lastCount=currentCount;
+      if(scroll.timedOut)break;
     }
     const cards=selectCards();
     return {restored:cards.length>=targetCount,endReached:hasNoMoreResults(),steps,cards:cards.length,targetCount,lastCount};
@@ -534,17 +537,17 @@
     }
     return false;
   }
-  async function waitForResultsOutcome(previousCount,timeout=10000) {
+  async function waitForResultsOutcome(scroller,before,timeout=10000) {
     const started=Date.now();
-    let stableSince=Date.now();
     while(Date.now()-started<timeout) {
-      if(hasNoMoreResults())return {endReached:true,loading:false};
-      if(selectCards().length>previousCount)return {endReached:false,loading:resultsSpinnerVisible()};
-      if(resultsSpinnerVisible())stableSince=Date.now();
-      else if(Date.now()-stableSince>=1100)return {endReached:false,loading:false};
+      if(hasNoMoreResults())return {endReached:true,newResults:false,feedChanged:false,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started};
+      const current=resultsSnapshot(scroller);
+      const newResults=current.count>before.count||current.keys!==before.keys;
+      const heightChanged=current.height!==before.height;
+      if(newResults||heightChanged)return {endReached:false,newResults,feedChanged:true,heightChanged,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started};
       await wait(250);
     }
-    return {endReached:hasNoMoreResults(),loading:resultsSpinnerVisible()};
+    return {endReached:hasNoMoreResults(),newResults:false,feedChanged:false,loading:resultsSpinnerVisible(),waitedMs:Date.now()-started,timedOut:true};
   }
   function cardDetailHeadingVisible(name) {
     const target=canonical(name);
@@ -583,16 +586,18 @@
     }
     return {ok:false,before,actual:mapsSearchValue(),cards:selectCards().length,endReached:hasNoMoreResults(),routeMatches:canonical(utils.fromSearch(location.href))===canonical(desired),url:location.href};
   }
-  function restoreResultsPosition(position) {
+  async function restoreResultsPosition(position) {
     const cards=selectCards(),scroller=getScrollTarget(cards);
-    if(scroller) {
-      const top=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
-      scroller.scrollTop=top;
-      scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
-      return {restored:true,top:scroller.scrollTop,method:"container"};
+    if(!scroller)return {restored:false,top:window.scrollY,method:"no-results-panel"};
+    const target=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
+    let steps=0;
+    while(Math.abs(scroller.scrollTop-target)>70&&steps<60&&!stopped) {
+      const before=scroller.scrollTop,delta=Math.max(-420,Math.min(420,target-before));
+      await dispatchMapsWheel(scroller,delta);
+      steps++;
+      if(Math.abs(scroller.scrollTop-before)<2)break;
     }
-    window.scrollTo({top:Number(position?.top)||0,behavior:"instant"});
-    return {restored:Boolean(cards.length),top:window.scrollY,method:"window"};
+    return {restored:Math.abs(scroller.scrollTop-target)<=100,top:scroller.scrollTop,target,steps,method:"mouse-wheel"};
   }
   function clickMapsBackControl() {
     const candidates=[...document.querySelectorAll('button,[role="button"]')].filter(el=>{
@@ -621,9 +626,9 @@
         }
         // Maps can return to its list at scrollTop=0 after history.back().
         // Restore the pre-click position before searching farther down.
-        const first=restoreResultsPosition(position);
+        const first=await restoreResultsPosition(position);
         await wait(260);
-        const second=restoreResultsPosition(position);
+        const second=await restoreResultsPosition(position);
         return {ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(previousUrl)};
       }
       if(!backControlClicked&&Date.now()-started>3500&&/\/maps\/place\//i.test(location.pathname))backControlClicked=clickMapsBackControl();
@@ -644,7 +649,7 @@
       attemptedNames.push(card.name);
       const previousUrl=location.href;
       const previousPosition=captureResultsPosition();
-      if(!clickCard(card,{requireMapsPlace:true}))continue;
+      if(!await clickCard(card,{requireMapsPlace:true}))continue;
       const started=Date.now();
       let opened=false,openedBy="";
       while(Date.now()-started<2600&&!stopped) {
@@ -748,7 +753,12 @@
     const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
     const recoveryTried=new Set();
     let finishReason="error";
+    let wheelSessionStarted=false;
     try {
+      const wheelSession=await chrome.runtime.sendMessage({type:"GLCSV_WHEEL_BEGIN"});
+      if(!wheelSession?.ok)throw new Error(`No se pudo activar la rueda nativa de Maps: ${wheelSession?.error||"Chrome rechazó chrome.debugger"}`);
+      wheelSessionStarted=true;
+      logEvent(state,"info","Sesión de rueda del navegador activa para el panel de resultados",{tabId,debuggerAttached:true});
       // Requeue durable work from a previous pause/reload before scanning further.
       for(const row of pendingDetails.values())detailQueue.push(row);
       pumpDetailQueue();
@@ -770,7 +780,7 @@
           }else{
             state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
             showOverlay(state.message);
-            const clicked=clickCard(card);
+            const clicked=await clickCard(card);
             const panel=clicked ? await waitForPanel(card.name) : null;
             if (panel) {
             const detailPhone=phoneFromNode(panel);
@@ -835,7 +845,8 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        noProgress=endReached?0:(hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
+        noProgress=endReached?0:scroll.timedOut?MAX_NO_PROGRESS:
+          (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
         let recovery=null, recoveryScroll=null, recoveryCycles=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           while(!stopped&&!endReached&&!hasNew) {
@@ -958,6 +969,10 @@
       state.message=`Interrumpido: ${err?.message || err}. Los ${rows.size} resultados guardados siguen disponibles.`;
       logEvent(state,"error",state.message,{stack:String(err?.stack||"").slice(0,1800),iterations,rows:rows.size});
     } finally {
+      if(wheelSessionStarted) {
+        await chrome.runtime.sendMessage({type:"GLCSV_WHEEL_END"}).catch(()=>{});
+        logEvent(state,"info","Sesión de rueda del navegador cerrada",{tabId});
+      }
       state.rows=[...rows.values()];
       state.queryRows=queryRows;
       state.inspectedIds=[...inspected];
