@@ -32,14 +32,21 @@ async function dispatchMapsWheel(message,sender) {
   const tabId=sender.tab?.id;
   if(!Number.isInteger(tabId)||!debuggerWheelTabs.has(tabId))
     throw new Error('La sesión de rueda de Google Maps no está activa.');
-  const x=Number(message.x),y=Number(message.y),deltaY=Number(message.deltaY);
+  const x=Number(message.x),y=Number(message.y);
+  const deltas=(Array.isArray(message.deltas)?message.deltas:[message.deltaY]).map(Number);
   const tab=await chrome.tabs.get(tabId);
-  if(![x,y,deltaY].every(Number.isFinite)||deltaY===0||x<0||y<0||x>(tab.width||10000)||y>(tab.height||10000))
+  if(![x,y,...deltas].every(Number.isFinite)||!deltas.length||deltas.length>5||deltas.some(delta=>delta===0)||x<0||y<0||x>(tab.width||10000)||y>(tab.height||10000))
     throw new Error('Las coordenadas o el desplazamiento de la rueda no son válidos.');
-  await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{
-    type:'mouseWheel',x,y,deltaX:0,deltaY:Math.max(-500,Math.min(500,deltaY)),pointerType:'mouse'
-  });
-  return {ok:true,x,y,deltaY};
+  const sent=[];
+  for(const deltaY of deltas) {
+    const step=Math.max(-450,Math.min(450,deltaY));
+    await chrome.debugger.sendCommand({tabId},'Input.dispatchMouseEvent',{
+      type:'mouseWheel',x,y,deltaX:0,deltaY:step,pointerType:'mouse'
+    });
+    sent.push(step);
+    if(sent.length<deltas.length)await new Promise(resolve=>setTimeout(resolve,45));
+  }
+  return {ok:true,x,y,deltas:sent,totalDeltaY:sent.reduce((total,delta)=>total+delta,0)};
 }
 
 async function endMapsWheelSession(sender) {

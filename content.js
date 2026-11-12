@@ -475,17 +475,19 @@
     if(bounds.width<100||bounds.height<120)throw new Error("El panel de resultados no tiene un área visible para enviar la rueda.");
     const x=Math.round(Math.max(bounds.left+8,Math.min(bounds.right-8,bounds.left+Math.min(100,bounds.width*.32))));
     const y=Math.round(Math.max(bounds.top+8,Math.min(bounds.bottom-8,bounds.top+bounds.height*.68)));
-    const response=await chrome.runtime.sendMessage({type:"GLCSV_WHEEL",x,y,deltaY});
+    const deltas=Array.isArray(deltaY)?deltaY:[deltaY];
+    const response=await chrome.runtime.sendMessage({type:"GLCSV_WHEEL",x,y,deltas});
     if(!response?.ok)throw new Error(response?.error||"Chrome no pudo enviar la rueda al panel de resultados.");
-    await wait(240);
-    return {x,y,deltaY:response.deltaY};
+    return {x,y,deltas:response.deltas,totalDeltaY:response.totalDeltaY};
   }
   async function advanceResults(cards) {
     const scroller=getScrollTarget(cards);
     if(!scroller)return {moved:false,method:"no-results-panel",topBefore:0,topAfter:0,cardsBefore:selectCards().length,cardsAfter:selectCards().length,timedOut:true,wheelError:"No se encontró el panel desplazable de resultados."};
     const before=resultsSnapshot(scroller),old=before.top,maxTop=Math.max(0,scroller.scrollHeight-scroller.clientHeight);
     const target=`${scroller.tagName.toLowerCase()}${scroller.id?`#${scroller.id}`:""}${typeof scroller.className==="string"&&scroller.className?`.${scroller.className.trim().split(/\s+/).slice(0,3).join(".")}`:""}`;
-    const wheel=await dispatchMapsWheel(scroller,220);
+    // A brief three-notch burst moves about a screen and a half, then Maps
+    // gets the full result-wait window before another burst is sent.
+    const wheel=await dispatchMapsWheel(scroller,[300,340,380]);
     const outcome=await waitForResultsOutcome(scroller,before,10000);
     const after=resultsSnapshot(scroller);
     return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,...outcome};
