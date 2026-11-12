@@ -591,7 +591,8 @@
     const DETAIL_CONCURRENCY=within(Math.round(Number(detailConcurrency)||5),1,20), MAX_DETAIL_BACKLOG=Math.max(15,DETAIL_CONCURRENCY*3);
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
-    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, lastReloadRecoveryAt:Number(existing.lastReloadRecoveryAt)||0, ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const keepResumeFrontier=campaignId?sameCampaignQuery:canResume;
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, lastReloadRecoveryAt:Number(existing.lastReloadRecoveryAt)||0, reloadResumeFrontier:keepResumeFrontier?String(existing.reloadResumeFrontier||""):"", awaitingResumeFrontier:Boolean(keepResumeFrontier&&existing.awaitingResumeFrontier&&existing.reloadResumeFrontier), ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
     const snapshot=()=>({...state,rows:[...rows.values()].map(row=>({...row})),queryRows:queryRows.map(row=>({...row})),inspectedIds:[...inspected],pendingDetails:[...pendingDetails.values()].map(row=>({...row})),logs:[...(state.logs||[])]});
     const saveSnapshot=()=>{const copy=snapshot();persistChain=persistChain.catch(()=>{}).then(()=>writeState(copy));lastCheckpoint=Date.now();return persistChain;};
     const scheduleCheckpoint=(force=false)=>{
@@ -632,7 +633,10 @@
     };
     const drainDetailQueue=async()=>{while(detailQueue.length||activeDetails){pumpDetailQueue();if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);}};
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
-    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,...(campaignId?{campaignId}: {})});
+    const resumeFrontier=state.reloadResumeFrontier;
+    let awaitingResumeFrontier=state.awaitingResumeFrontier;
+    if(awaitingResumeFrontier)state.message="Volviendo hasta la última ficha procesada; todavía no cuento intentos sin avance…";
+    logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,resumingThroughPriorCards:awaitingResumeFrontier,resumeFrontier:resumeFrontier||undefined,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
     let noProgress=0;
@@ -657,6 +661,19 @@
         iterations++;
         const cards=selectCards();
         if(cards.length) {emptyFeedRecoveryAttempts=0;state.emptyFeedRecoveryAttempts=0;}
+        if(awaitingResumeFrontier) {
+          const frontierCard=cards.find(card=>card.key===resumeFrontier);
+          const scroller=getScrollTarget(cards),cardRect=frontierCard?rect(frontierCard.element):null,scrollRect=scroller?rect(scroller):null;
+          const frontierVisible=Boolean(frontierCard&&scroller&&cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12);
+          if(frontierVisible) {
+            awaitingResumeFrontier=false;
+            state.awaitingResumeFrontier=false;
+            state.reloadResumeFrontier="";
+            state.message="Última ficha ya alcanzada; contando intentos sin avance desde este punto.";
+            logEvent(state,"info","Se alcanzó la última ficha inspeccionada antes de la recarga; comienza el conteo de avance desde aquí",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cards.length});
+            await scheduleCheckpoint(true);
+          }
+        }
         const pending=cards.filter(c=>!inspected.has(c.key));
         if(hasNoMoreResults()&&!pending.length){endReached=true;break;}
         let count=0;
@@ -712,7 +729,22 @@
         showOverlay(state.message);
         const beforeNoProgress=noProgress;
         const scroll=await advanceResults(cards);
-        let hasNew=selectCards().some(c=>!inspected.has(c.key));
+        const cardsAfterScroll=selectCards();
+        let hasNew=cardsAfterScroll.some(c=>!inspected.has(c.key));
+        let reachedFrontierThisScroll=false;
+        if(awaitingResumeFrontier) {
+          const frontierCard=cardsAfterScroll.find(card=>card.key===resumeFrontier);
+          const scroller=getScrollTarget(cardsAfterScroll),cardRect=frontierCard?rect(frontierCard.element):null,scrollRect=scroller?rect(scroller):null;
+          reachedFrontierThisScroll=Boolean(frontierCard&&scroller&&cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12);
+          if(reachedFrontierThisScroll) {
+            awaitingResumeFrontier=false;
+            state.awaitingResumeFrontier=false;
+            state.reloadResumeFrontier="";
+            state.message="Última ficha ya alcanzada; contando intentos sin avance desde este punto.";
+            logEvent(state,"info","El scroll llegó a la última ficha inspeccionada; este desplazamiento no cuenta como intento sin avance",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cardsAfterScroll.length});
+            await scheduleCheckpoint(true);
+          }
+        }
         const endMarkerVisible=Boolean(scroll.endReached||hasNoMoreResults());
         endReached=endMarkerVisible&&!hasNew;
         let listResetRecovery=null;
@@ -736,7 +768,7 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        noProgress=endReached?0:scroll.timedOut?MAX_NO_PROGRESS:
+        noProgress=endReached||awaitingResumeFrontier||reachedFrontierThisScroll?0:scroll.timedOut?MAX_NO_PROGRESS:
           (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
         if(hasNew||count>0)state.lastReloadRecoveryAt=0;
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
@@ -768,10 +800,13 @@
             const reloadUrl=location.href;
             const reloadPosition=captureResultsPosition();
             state.lastReloadRecoveryAt=Date.now();
+            state.reloadResumeFrontier=[...inspected].at(-1)||"";
+            state.awaitingResumeFrontier=Boolean(state.reloadResumeFrontier);
             state.message=`Maps quedó atascado. Guardando ${rows.size} fichas y recargando esta búsqueda para continuar…`;
             logEvent(state,"warn","Maps atascado: checkpoint guardado; se recargará la misma búsqueda y se reanudará automáticamente",{
               query:expectedQuery,url:reloadUrl,scrollTop:reloadPosition.top,rows:rows.size,inspected:inspected.size,
-              pendingDetails:pendingDetails.size,spinnerVisible:resultsSpinnerVisible(),campaignId:campaignId||undefined
+              pendingDetails:pendingDetails.size,spinnerVisible:resultsSpinnerVisible(),resumeFrontier:state.reloadResumeFrontier||undefined,
+              awaitResumeFrontier:state.awaitingResumeFrontier,campaignId:campaignId||undefined
             });
             state.updatedAt=Date.now();
             await scheduleCheckpoint(true);
