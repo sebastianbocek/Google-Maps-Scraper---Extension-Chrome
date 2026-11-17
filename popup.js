@@ -129,7 +129,7 @@
   function renderLog(entries) {
     const logs=Array.isArray(entries)?entries:[];
     els.logCount.textContent=`${logs.length} evento${logs.length===1?"":"s"}`;
-    els.logOutput.value=logs.slice(-80).map(formatLog).join("\n")||"Todavía no hay eventos registrados.";
+    els.logOutput.value=logs.slice(-200).map(formatLog).join("\n")||"Todavía no hay eventos registrados.";
     els.logOutput.scrollTop=els.logOutput.scrollHeight;
   }
   const trash='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m3 0-1 14H6L5 6m5 4v7m4-7v7"/></svg>';
@@ -284,7 +284,7 @@
     const latest=stored[STATE_KEY]||state;
     const logs=Array.isArray(latest.logs)?latest.logs:[];
     logs.push({time:new Date().toISOString(),level,event,details});
-    latest.logs=logs.slice(-200);
+    latest.logs=logs.slice(-4000);
     await chrome.storage.local.set({[STATE_KEY]:latest});
   }
   async function currentTab() {

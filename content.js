@@ -371,26 +371,47 @@
       businessUrl:baseRow.businessUrl||location.href
     };
   }
-  async function clickCard(card,{requireMapsPlace=false}={}) {
+  async function clickCard(card,{requireMapsPlace=false,state=null,context="business-scan"}={}) {
     const root = card.element;
-    if (!root?.isConnected) return false;
+    if (!root?.isConnected) {
+      logEvent(state,"warn","Clic de ficha no realizado",{name:card?.name||"",context,selector:"card.element",clicked:false,reason:"card-disconnected",urlBefore:location.href});
+      return false;
+    }
+    const urlBefore=location.href;
+    let selector="card.element",target=null;
     try {
+      const placeSelector='a.hfpxzc,a[href*="/maps/place/"]';
+      const headlineSelector=".dbg0pd, .fontHeadlineSmall, .qBF1Pd";
       const placeLink=[...root.querySelectorAll('a.hfpxzc,a[href*="/maps/place/"]')].find(anchor=>{
         try {
           const url=new URL(unwrapUrl(anchor.getAttribute("href")||""));
           return /(^|\.)google\.[a-z.]+$/i.test(url.hostname)&&url.pathname.startsWith("/maps/place/");
         } catch {return false;}
       });
-      if(requireMapsPlace&&!placeLink)return false;
-      let target = placeLink || root.querySelector(".dbg0pd, .fontHeadlineSmall, .qBF1Pd") || (!requireMapsPlace?root:null);
-      if(!target)return false;
-      if (target.closest("#glcsv-float")) return false;
+      if(requireMapsPlace&&!placeLink) {
+        logEvent(state,"warn","Clic de ficha no realizado",{name:card.name,context,selector:placeSelector,clicked:false,reason:"maps-place-link-not-found",urlBefore});
+        return false;
+      }
+      target = placeLink || root.querySelector(headlineSelector) || (!requireMapsPlace?root:null);
+      selector=placeLink?placeSelector:root.querySelector(headlineSelector)?headlineSelector:"card.element";
+      if(!target) {
+        logEvent(state,"warn","Clic de ficha no realizado",{name:card.name,context,selector:requireMapsPlace?placeSelector:headlineSelector,clicked:false,reason:"target-not-found",urlBefore});
+        return false;
+      }
+      if (target.closest("#glcsv-float")) {
+        logEvent(state,"warn","Clic de ficha no realizado",{name:card.name,context,selector,clicked:false,reason:"target-inside-extension-overlay",urlBefore});
+        return false;
+      }
       target.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,cancelable:true,view:window}));
       target.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
       target.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
       target.click();
+      logEvent(state,"info","Clic de ficha enviado",{name:card.name,key:card.key,context,selector,targetTag:target.tagName.toLowerCase(),targetClass:String(target.className||"").slice(0,160),targetHref:target.getAttribute("href")||"",clicked:true,urlBefore,urlAfter:location.href});
       return true;
-    } catch { return false; }
+    } catch(error) {
+      logEvent(state,"error","Error al ejecutar clic de ficha",{name:card.name,context,selector,targetTag:target?.tagName?.toLowerCase(),targetClass:String(target?.className||"").slice(0,160),targetHref:target?.getAttribute("href")||"",clicked:false,urlBefore,urlAfter:location.href,error:String(error?.message||error)});
+      return false;
+    }
   }
   function drawOverlay() {
     if (ui?.root?.isConnected) return;
@@ -519,6 +540,169 @@
     const cards=selectCards();
     return {restored:cards.length>=targetCount,endReached:hasNoMoreResults(),steps,cards:cards.length,targetCount,lastCount};
   }
+  function restoreResultsPosition(position) {
+    const scroller=getScrollTarget(selectCards());
+    if(!scroller)return {restored:false,top:window.scrollY};
+    const top=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
+    scroller.scrollTop=top;
+    scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
+    return {restored:true,top:scroller.scrollTop};
+  }
+  function clickMapsResultsBack(state=null,context="return-to-results") {
+    const selector='button,[role="button"]';
+    const candidates=[...document.querySelectorAll(selector)].filter(el=>{
+      if(el.closest("#glcsv-float"))return false;
+      const label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""} ${safeText(el)}`);
+      const r=rect(el);
+      return r.width>0&&r.height>0&&r.top<190&&r.left<innerWidth*.65&&/(back|volver|atras|regresar)/.test(label);
+    }).sort((a,b)=>rect(a).top-rect(b).top||rect(a).left-rect(b).left);
+    const target=candidates[0];
+    if(!target)return false;
+    const label=target.getAttribute("aria-label")||target.getAttribute("title")||plain(safeText(target));
+    const value=target.getAttribute("aria-label")||target.getAttribute("title");
+    const targetSelector=value?`${target.tagName.toLowerCase()}[${target.hasAttribute("aria-label")?"aria-label":"title"}="${value}"]`:
+      `${target.tagName.toLowerCase()}${target.id?"#"+target.id:""}`;
+    const urlBefore=location.href;
+    target.click();
+    logEvent(state,"info","Clic en volver a resultados enviado",{context,selector:targetSelector,label,clicked:true,urlBefore,urlAfter:location.href});
+    return true;
+  }
+  function submitCurrentMapsSearch(expectedQuery,state=null,context="restore-search-query") {
+    const input=mapsSearchInput();
+    const actualQuery=plain(input?.value||"");
+    if(!input||!expectedQuery||canonical(actualQuery)!==canonical(expectedQuery)) {
+      logEvent(state,"warn","No se reenvió la búsqueda guardada porque el cuadro no coincide",{
+        context,expectedQuery,actualQuery,selector:input?"input#searchboxinput,input[role=combobox]":"search-input-not-found",clicked:false,urlBefore:location.href
+      });
+      return false;
+    }
+    const selector='button#searchbox-searchbutton,button[aria-label*="search" i],button[aria-label*="buscar" i],button[title*="search" i],button[title*="buscar" i]';
+    const target=[...document.querySelectorAll(selector)].find(el=>!el.closest("#glcsv-float")&&rect(el).width>0&&rect(el).height>0);
+    if(!target) {
+      logEvent(state,"warn","No se encontró el botón para reenviar la búsqueda guardada",{context,selector,expectedQuery,clicked:false,urlBefore:location.href});
+      return false;
+    }
+    const actualSelector=target.id?`${target.tagName.toLowerCase()}#${target.id}`:
+      target.getAttribute("aria-label")?`${target.tagName.toLowerCase()}[aria-label="${target.getAttribute("aria-label")}"]`:
+      `${target.tagName.toLowerCase()}[title="${target.getAttribute("title")||""}"]`;
+    const urlBefore=location.href;
+    target.click();
+    logEvent(state,"info","Búsqueda guardada reenviada desde Maps",{context,selector:actualSelector,expectedQuery,actualQuery,clicked:true,urlBefore,urlAfter:location.href});
+    return true;
+  }
+  async function restoreSearchAfterRecovery(previousUrl,position,expectedName="",state=null,searchUrl="") {
+    const started=Date.now();
+    const urlBefore=location.href;
+    const expectedSearchUrl=utils.fromSearch(searchUrl)?searchUrl:previousUrl;
+    const expectedQuery=utils.fromSearch(expectedSearchUrl);
+    let returnMethod="maps-results-back";
+    logEvent(state,"info","Inicio de retorno a resultados",{method:returnMethod,urlBefore,expectedSearchUrl,expectedQuery,expectedName,position});
+    if(!clickMapsResultsBack(state,"return-to-results")) {
+      returnMethod="history.back";
+      history.back();
+    }
+    let lastReturnAttempt=Date.now(),searchResubmitAttempted=false,searchResubmitted=false;
+    while(Date.now()-started<9000&&!stopped) {
+      const queryMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
+      const searchRoute=/\/maps\/search(?:\/|$)/i.test(location.pathname);
+      if(searchRoute&&selectCards().length&&queryMatches) {
+        const first=restoreResultsPosition(position);
+        await wait(260);
+        const stillOnSearchRoute=/\/maps\/search(?:\/|$)/i.test(location.pathname);
+        const queryStillMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
+        const cardsAfterWait=selectCards().length;
+        if(!stillOnSearchRoute||!cardsAfterWait||!queryStillMatches) {
+          await wait(180);
+          continue;
+        }
+        const second=restoreResultsPosition(position);
+        const result={ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(expectedSearchUrl)};
+        logEvent(state,"info","Retorno a resultados completado",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),searchMatchesOriginal:result.searchMatchesOriginal,positionBefore:position,positionAfter:second,cards:selectCards().length});
+        return result;
+      }
+      if(!searchResubmitAttempted&&Date.now()-started>1500&&/\/maps\/place\//i.test(location.pathname)) {
+        searchResubmitAttempted=true;
+        searchResubmitted=submitCurrentMapsSearch(expectedQuery,state,"return-to-results");
+        if(searchResubmitted)returnMethod="resubmit-saved-query";
+      }
+      if(!searchResubmitted&&Date.now()-lastReturnAttempt>1500&&/\/maps\/place\//i.test(location.pathname)) {
+        if(clickMapsResultsBack(state,"retry-return-to-results"))lastReturnAttempt=Date.now();
+      }
+      await wait(180);
+    }
+    logEvent(state,"error","No se pudo volver a resultados",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),expectedName,cards:selectCards().length,elapsedMs:Date.now()-started});
+    return {ok:false,url:location.href};
+  }
+  async function openBusinessCardAndReturn(card,country="auto",searchUrl="",state=null,context="business-scan") {
+    if(!card?.element?.isConnected)return {opened:false,reason:"card-disconnected"};
+    const expectedQuery=utils.fromSearch(searchUrl);
+    const queryMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
+    if(!selectCards().length||!queryMatches)return {opened:false,reason:"results-list-not-ready",url:location.href,queryMatches};
+    const previousUrl=location.href,position=captureResultsPosition();
+    if(!clickCard(card,{state,context}))return {opened:false,reason:"click-failed"};
+    const started=Date.now();
+    let opened=false,openedBy="",panel=null;
+    // Google Maps sometimes updates the detail title before it commits the
+    // place URL. Returning during that gap makes history.back race the pending
+    // navigation and can leave the scraper on the previous business instead
+    // of the results list.
+    while(Date.now()-started<9000&&!stopped) {
+      panel=findBusinessPanel(card.name);
+      if(location.href!==previousUrl&&/\/maps\/place\//i.test(location.pathname)) {
+        opened=true;
+        openedBy=panel||cardDetailHeadingVisible(card.name)?"place-url-and-business-title":"place-url";
+        break;
+      }
+      await wait(150);
+    }
+    if(!opened)return {opened:false,reason:"place-url-not-committed",url:location.href};
+    panel=findBusinessPanel(card.name)||panel;
+    let details=panel?{
+      phone:phoneFromNode(panel),address:findAddress(panel),website:externalWebsite(panel),
+      rating:findRating(panel),category:findCategory(panel,true)
+    }:{};
+    if(!panel&&/\/maps\/place\//i.test(location.pathname)) {
+      const extracted=await extractPlaceDetails(rowFromCard(card,country,searchUrl));
+      details={phone:extracted.phone,address:extracted.address,website:extracted.website,rating:extracted.rating,category:extracted.category};
+    }
+    logEvent(state,"info","Apertura de ficha observada",{name:card.name,context,detectionMethod:openedBy,urlBefore:previousUrl,urlAfter:location.href});
+    const restored=await restoreSearchAfterRecovery(previousUrl,position,card.name,state,searchUrl);
+    if(!restored.ok)return {opened:true,restoreFailed:true,openedBy,details,urlAfter:restored.url,previousUrl,position};
+    return {opened:true,openedBy,details,restored};
+  }
+  async function scrollResultsToBottom(inspected,maxSteps=80) {
+    let steps=0,lastScroll=null;
+    while(steps<maxSteps&&!stopped) {
+      const cards=selectCards(),scroller=getScrollTarget(cards);
+      if(!scroller)return {newResults:false,steps,lastScroll,error:"No se encontró el panel de resultados."};
+      const before=resultsSnapshot(scroller);
+      lastScroll=await advanceResults(cards);
+      steps++;
+      const current=selectCards();
+      const fresh=current.filter(item=>!inspected.has(item.key));
+      if(fresh.length||lastScroll.newResults)return {newResults:true,newCount:fresh.length||Math.max(1,Number(lastScroll.cardsAfter)-Number(lastScroll.cardsBefore)),steps,lastScroll};
+      const after=resultsSnapshot(getScrollTarget(current));
+      if(lastScroll.endReached||hasNoMoreResults()||after.top<=before.top)break;
+    }
+    return {newResults:false,newCount:0,steps,lastScroll,endReached:hasNoMoreResults()};
+  }
+  async function recoverSpinnerByReopeningPriorCards(inspected,recoveryTried,state) {
+    const attempts=[];
+    let openedCount=0;
+    while(!stopped&&openedCount<3) {
+      const card=selectCards().filter(item=>inspected.has(item.key)&&!recoveryTried.has(item.key)).at(-1);
+      if(!card)break;
+      recoveryTried.add(card.key);
+      const openedResult=await openBusinessCardAndReturn(card,"auto",state.searchUrl||"",state,"stalled-feed-recovery");
+      if(!openedResult.opened) {attempts.push({name:card.name,opened:false,reason:openedResult.reason});continue;}
+      openedCount++;
+      if(openedResult.restoreFailed)return {recovered:false,restoreFailed:true,card:card.name,attempts:[...attempts,{name:card.name,opened:true,restoreFailed:true}]};
+      const scrollToBottom=await scrollResultsToBottom(inspected);
+      attempts.push({name:card.name,opened:true,openedBy:openedResult.openedBy,restored:openedResult.restored,scrollToBottom});
+      if(scrollToBottom.newResults)return {recovered:true,newResults:true,newCount:scrollToBottom.newCount,openedCount,scrollAttempts:openedCount,attempts};
+    }
+    return {recovered:false,newResults:false,attempts,openedCount,scrollAttempts:attempts.filter(item=>item.opened&&!item.restoreFailed).length};
+  }
   function hasNoMoreResults() {
     const endings=new Set(["no hay mas resultados","no more results"]);
     const scope=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||getScrollTarget(selectCards())||document.body;
@@ -559,9 +743,10 @@
       .find(input=>rect(input).width>0&&rect(input).height>0)||null;
   }
   function mapsSearchValue() {return plain(mapsSearchInput()?.value||"");}
-  const MAX_LOG_ENTRIES=200;
+  const MAX_LOG_ENTRIES=4000;
   const MAX_NO_PROGRESS=8;
   function logEvent(state,level,event,details={}) {
+    if(!state)return;
     const logs=Array.isArray(state.logs)?state.logs:[];
     logs.push({time:new Date().toISOString(),level,event,details});
     state.logs=logs.slice(-MAX_LOG_ENTRIES);
@@ -635,7 +820,7 @@
     const settleActiveDetails=async()=>{stopDetailQueue=true;while(activeDetails)if(activeDetailTasks.size)await Promise.race([...activeDetailTasks]);else await wait(100);};
     const resumeFrontier=state.reloadResumeFrontier;
     let awaitingResumeFrontier=state.awaitingResumeFrontier;
-    if(awaitingResumeFrontier)state.message="Volviendo hasta la última ficha procesada; todavía no cuento intentos sin avance…";
+    if(awaitingResumeFrontier)state.message="Volviendo hasta la última ficha procesada para reanudar el escaneo…";
     logEvent(state,"info",(campaignId?sameCampaign:canResume)?"Extracción reanudada":"Extracción iniciada",{query:utils.fromSearch(searchUrl),campaignQuery:campaignQuery||undefined,limit,detailTabs:DETAIL_CONCURRENCY,resumedRows:rows.size,alreadyInspected:inspected.size,tabId,resumingThroughPriorCards:awaitingResumeFrontier,resumeFrontier:resumeFrontier||undefined,...(campaignId?{campaignId}: {})});
     await writeState(state);
     showOverlay("Buscando fichas...");
@@ -644,6 +829,8 @@
     let endReached=false;
     let reloadRequested=false;
     let lastReloadCooldownLogAt=0;
+    let noCardsSince=0;
+    const priorCardRecoveryTried=new Set();
     let emptyFeedRecoveryAttempts=Number(existing.emptyFeedRecoveryAttempts)||0;
     let emptyFeedAdvance=false;
     const expectedQuery=plain(campaignQuery||utils.fromSearch(searchUrl));
@@ -660,6 +847,16 @@
       while (!stopped && !endReached && (limit===0 || queryProcessed < limit)) {
         iterations++;
         const cards=selectCards();
+        if(!cards.length&&!hasNoMoreResults()) {
+          if(!noCardsSince)noCardsSince=Date.now();
+          const inReloadCooldown=Number(state.lastReloadRecoveryAt)>0&&Date.now()-Number(state.lastReloadRecoveryAt)<45000;
+          if(Date.now()-noCardsSince<15000||inReloadCooldown) {
+            state.message="Esperando que Google Maps cargue la lista de resultados…";
+            showOverlay(state.message);
+            await wait(500);
+            continue;
+          }
+        } else noCardsSince=0;
         if(cards.length) {emptyFeedRecoveryAttempts=0;state.emptyFeedRecoveryAttempts=0;}
         if(awaitingResumeFrontier) {
           const frontierCard=cards.find(card=>card.key===resumeFrontier);
@@ -679,30 +876,35 @@
         let count=0;
         for (const card of pending) {
           if (stopped || (limit>0 && queryProcessed>=limit)) break;
-          if (!card.element.isConnected) continue;
-          inspected.add(card.key);
-          const add=rowFromCard(card,country,searchUrl);
+          const currentCard=selectCards().find(item=>item.key===card.key)||card;
+          if (!currentCard.element?.isConnected) continue;
+          const add=rowFromCard(currentCard,country,searchUrl);
+          state.message="Abriendo ficha: "+currentCard.name;
+          showOverlay(state.message);
+          let mainTabOpen=null;
+          for(let openAttempt=0;openAttempt<3&&!stopped;openAttempt++) {
+            const freshCard=selectCards().find(item=>item.key===currentCard.key)||currentCard;
+            mainTabOpen=await openBusinessCardAndReturn(freshCard,country,searchUrl,state,"business-scan");
+            if(mainTabOpen.opened||mainTabOpen.restoreFailed)break;
+            await wait(250);
+          }
+          if(!mainTabOpen?.opened) {
+            logEvent(state,"warn","No se pudo abrir la ficha en Maps; sigo con la siguiente ficha",{
+              name:currentCard.name,reason:mainTabOpen?.reason||"unknown",businessUrl:Boolean(add.businessUrl),attempts:3
+            });
+            mainTabOpen={opened:false,details:{}};
+          }
+          inspected.add(currentCard.key);
+          if(mainTabOpen.details.phone)add.phone=mainTabOpen.details.phone;
+          if(mainTabOpen.details.address){add.address=mainTabOpen.details.address;add.location=utils.locality(add.address);}
+          if(mainTabOpen.details.website)add.website=mainTabOpen.details.website;
+          if(mainTabOpen.details.rating)add.rating=mainTabOpen.details.rating;
+          if(mainTabOpen.details.category)add.category=mainTabOpen.details.category;
+          const restoreSearchAfterCard=Boolean(mainTabOpen.restoreFailed);
+          add.whatsappLink=whatsapp(add.phone,country,add.address||add.location,searchUrl);
           if(add.businessUrl){
             state.message=`En cola ${activeDetails+detailQueue.length+1}: ${card.name}`;
             enqueueDetail(add);
-          }else{
-            state.message=`Abriendo ficha ${campaignId?queryProcessed+1:rows.size+1}${limit ? "/"+limit : " (sin límite)"}: ${card.name}`;
-            showOverlay(state.message);
-            const clicked=await clickCard(card);
-            const panel=clicked ? await waitForPanel(card.name) : null;
-            if (panel) {
-            const detailPhone=phoneFromNode(panel);
-            const detailRating=findRating(panel);
-            const detailWebsite=externalWebsite(panel);
-            const detailCategory=findCategory(panel,true);
-            const detailAddress=findAddress(panel);
-            if (detailPhone) add.phone=detailPhone;
-            if (detailAddress) { add.address=detailAddress; add.location=utils.locality(detailAddress); }
-            add.whatsappLink=whatsapp(add.phone,country,add.address || add.location,searchUrl);
-            if (detailRating) add.rating=detailRating;
-            if (detailWebsite) add.website=detailWebsite;
-            if (detailCategory) add.category=detailCategory;
-            }
           }
           const queryIndex=queryRows.findIndex(row=>utils.sameBusiness(row,add));
           const duplicateInQuery=queryIndex>=0;
@@ -714,11 +916,35 @@
           state.inspectedIds=[...inspected];
           state.pendingDetails=[...pendingDetails.values()];
           state.message=`${rows.size} fichas · ${state.rows.filter(r=>r.phone).length} teléfonos · ${state.rows.filter(r=>r.category).length} categorías · ${state.rows.filter(r=>hasRealWebsite(r.website)).length} webs`;
-          logEvent(state,duplicateInQuery||stored.duplicate?"warn":"info",duplicateInQuery||stored.duplicate?"Ficha duplicada omitida":"Ficha guardada",{name:card.name,total:rows.size,duplicatesSkipped:duplicateInQuery||stored.duplicate,phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
+          logEvent(state,duplicateInQuery||stored.duplicate?"warn":"info",duplicateInQuery||stored.duplicate?"Ficha duplicada omitida":"Ficha guardada",{name:card.name,total:rows.size,duplicatesSkipped:duplicateInQuery||stored.duplicate,mainTabOpened:Boolean(mainTabOpen?.opened),phone:Boolean(add.phone),website:hasRealWebsite(add.website),businessUrl:Boolean(add.businessUrl)});
           state.updatedAt=Date.now();
           scheduleCheckpoint();
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
           count++;
+          if(restoreSearchAfterCard) {
+            state.lastReloadRecoveryAt=Date.now();
+            state.reloadResumeFrontier=currentCard.key;
+            state.awaitingResumeFrontier=true;
+            state.message="Maps dejó la búsqueda al abrir una ficha. Guardé el progreso y estoy restaurando la misma búsqueda…";
+            logEvent(state,"warn","Maps no volvió a la lista después de abrir una ficha; se restaurará la misma búsqueda",{
+              name:currentCard.name,searchUrl,
+              urlAfter:mainTabOpen.urlAfter,scrollTop:mainTabOpen.position?.top||0,
+              resumeFrontier:currentCard.key,rows:rows.size,inspected:inspected.size
+            });
+            await scheduleCheckpoint(true);
+            await flushCheckpoint();
+            reloadRequested=true;
+            const result=await chrome.runtime.sendMessage({type:"GLCSV_MAPS_RELOAD_RECOVERY",params:{
+              searchUrl,expectedQuery,limit,country,
+              parallelTabs:DETAIL_CONCURRENCY,campaignId:campaignId||"",
+              campaignQuery:campaignQuery||"",scrollTop:mainTabOpen.position?.top||0
+            }});
+            if(!result?.ok) {
+              reloadRequested=false;
+              throw new Error("No pude restaurar la búsqueda después de abrir «"+currentCard.name+"»: "+(result?.error||"error desconocido"));
+            }
+            return;
+          }
           if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
             while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
           if (!stopped&&!add.businessUrl) await wait(180);
@@ -741,7 +967,7 @@
             state.awaitingResumeFrontier=false;
             state.reloadResumeFrontier="";
             state.message="Última ficha ya alcanzada; contando intentos sin avance desde este punto.";
-            logEvent(state,"info","El scroll llegó a la última ficha inspeccionada; este desplazamiento no cuenta como intento sin avance",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cardsAfterScroll.length});
+            logEvent(state,"info","Se alcanzó la última ficha inspeccionada después de la recarga",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cardsAfterScroll.length,noProgressBefore:beforeNoProgress});
             await scheduleCheckpoint(true);
           }
         }
@@ -768,9 +994,42 @@
               ...listResetRecovery,hasUnseenCard:hasNew,endReached
             });
         }
-        noProgress=endReached||awaitingResumeFrontier||reachedFrontierThisScroll?0:scroll.timedOut?MAX_NO_PROGRESS:
-          (hasNew||count>0||listResetRecovery?.restored?0:noProgress+1);
+        const resultsAdvanced=Boolean(hasNew||scroll.newResults||count>0||listResetRecovery?.restored);
+        if(resultsAdvanced)priorCardRecoveryTried.clear();
+        const waitingForResumeFrontier=awaitingResumeFrontier&&!reachedFrontierThisScroll;
+        const noProgressResetReason=waitingForResumeFrontier?"awaiting-resume-frontier":endReached?"end-reached":resultsAdvanced?(hasNew||scroll.newResults?"new-results":"cards-processed"):"no-new-results";
+        noProgress=waitingForResumeFrontier?0:endReached||resultsAdvanced?0:noProgress+1;
         if(hasNew||count>0)state.lastReloadRecoveryAt=0;
+        let spinnerRecovery=null;
+        if(!endReached&&!stopped&&!hasNew&&noProgress>=3) {
+          state.message="Maps no cargó más resultados. Probando fichas anteriores desde la última detectada…";
+          showOverlay(state.message);
+          spinnerRecovery=await recoverSpinnerByReopeningPriorCards(inspected,priorCardRecoveryTried,state);
+          const recoveryFresh=selectCards().filter(card=>!inspected.has(card.key));
+          logEvent(state,spinnerRecovery.newResults?"info":"warn",spinnerRecovery.newResults?
+            "La lista respondió después de reabrir fichas anteriores":
+            "Recuperación sin resultados tras abrir "+spinnerRecovery.openedCount+" fichas y llegar al final",{
+              spinnerVisible:resultsSpinnerVisible(),openedCount:spinnerRecovery.openedCount,
+              scrollAttempts:spinnerRecovery.scrollAttempts,attempts:spinnerRecovery.attempts,
+              freshResults:recoveryFresh.length,restoreFailed:spinnerRecovery.restoreFailed||false
+            });
+          if(spinnerRecovery.restoreFailed)throw new Error(`Se abrió «${spinnerRecovery.card}», pero Maps no volvió a la lista de resultados.`);
+          if(spinnerRecovery.newResults||recoveryFresh.length) {
+            // Cada resultado nuevo reinicia por completo la secuencia de tres
+            // fichas y desplazamientos, incluso si Maps se vuelve a trabar luego.
+            priorCardRecoveryTried.clear();
+            noProgress=0;
+            hasNew=true;
+          } else if(!selectCards().length) {
+            // La ausencia temporal del feed tampoco sustituye los ocho
+            // intentos sin avance; el contador sigue su curso normal.
+          } else if(spinnerRecovery.openedCount<3||spinnerRecovery.scrollAttempts<3) {
+            // Solo fichas abiertas y recorridas hasta el final cuentan; las que
+            // no abren se omiten para probar la anterior sin gastar un intento.
+            // Conserva el contador 0/8 para que una lista atascada no quede
+            // atrapada repitiendo la recuperación en 2/8 indefinidamente.
+          }
+        }
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
           if(!selectCards().length&&campaignId&&Number(state.lastReloadRecoveryAt)>0) {
             emptyFeedRecoveryAttempts++;
@@ -835,7 +1094,7 @@
           endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,endReached,listResetRecovery,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,noProgressResetReason,awaitingResumeFrontier,reachedFrontierThisScroll,endReached,listResetRecovery,spinnerRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();

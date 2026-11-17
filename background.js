@@ -72,11 +72,11 @@ async function pauseInterruptedWork(reason) {
   if(state?.status==='running') {
     const logs=Array.isArray(state.logs)?state.logs:[];
     logs.push(logEntry);
-    updates.glcsv_state={...state,status:'paused',message:'Chrome recargó la extensión. Los resultados guardados siguen disponibles; puedes continuar desde el progreso guardado.',logs:logs.slice(-200),updatedAt:now};
+    updates.glcsv_state={...state,status:'paused',message:'Chrome recargó la extensión. Los resultados guardados siguen disponibles; puedes continuar desde el progreso guardado.',logs:logs.slice(-4000),updatedAt:now};
   } else if(updates[CAMPAIGN_KEY]&&state) {
     const logs=Array.isArray(state.logs)?state.logs:[];
     logs.push(logEntry);
-    updates.glcsv_state={...state,logs:logs.slice(-200),updatedAt:now};
+    updates.glcsv_state={...state,logs:logs.slice(-4000),updatedAt:now};
   }
   if(Object.keys(updates).length)await chrome.storage.local.set(updates);
 }
@@ -92,7 +92,7 @@ async function appendBackgroundLog(level,event,details={}) {
   const entry={time:new Date().toISOString(),level,event,details,...(details.campaignId?{campaignEvent:true}:{})};
   const logs=Array.isArray(state.logs)?state.logs:[];
   logs.push(entry);
-  state.logs=logs.slice(-200);
+  state.logs=logs.slice(-4000);
   state.updatedAt=Date.now();
   const updates={glcsv_state:state};
   if(details.campaignId) {
@@ -217,7 +217,10 @@ async function resumeAfterMapsReload(tabId) {
     await appendBackgroundLog('info','Maps recargó y la extracción se reanudó automáticamente',{
       campaignId:marker.campaignId||undefined,query:marker.expectedQuery,tabId,
       preservedRows:state.rows?.length||0,alreadyInspected:state.inspectedIds?.length||0,
-      pendingDetails:state.pendingDetails?.length||0,scrollTopBeforeReload:marker.scrollTop
+      pendingDetails:state.pendingDetails?.length||0,scrollTopBeforeReload:marker.scrollTop,
+      urlBeforeRestore:marker.urlBeforeRestore||'',urlExpected:marker.searchUrl,urlAfter:tab.url||'',
+      searchKeyExpected:marker.searchKey,searchKeyAfter:searchSourceKey(tab.url||''),
+      searchMatchesExpected:searchSourceKey(tab.url||'')===marker.searchKey
     });
   } catch(error) {
     const message=String(error?.message||error);
@@ -231,7 +234,7 @@ async function resumeAfterMapsReload(tabId) {
       const state=stored.glcsv_state||{};
       const logs=Array.isArray(state.logs)?state.logs:[];
       logs.push({time:new Date().toISOString(),level:'error',event:'Reanudación automática tras recargar Maps falló',details:{error:message}});
-      await chrome.storage.local.set({glcsv_state:{...state,status:'paused',message:`Maps se recargó, pero el scraper no pudo reanudarse: ${message}. El progreso guardado sigue disponible.`,logs:logs.slice(-200),updatedAt:Date.now()}});
+      await chrome.storage.local.set({glcsv_state:{...state,status:'paused',message:`Maps se recargó, pero el scraper no pudo reanudarse: ${message}. El progreso guardado sigue disponible.`,logs:logs.slice(-4000),updatedAt:Date.now()}});
       const campaign=stored[CAMPAIGN_KEY];
       if(marker.campaignId&&campaign?.id===marker.campaignId&&campaign.status!=='paused')
         await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:`La recuperación automática de Maps falló: ${message}. Puedes continuar desde el progreso guardado.`,updatedAt:Date.now()}});
@@ -458,14 +461,17 @@ async function reloadMapsForRecovery(message,sender) {
   const tabId=sender.tab?.id;
   if(!Number.isInteger(tabId))throw new Error('No pude identificar la pestaña de Maps que se debe recuperar.');
   const tab=await chrome.tabs.get(tabId);
-  if(!supportedSearchUrl(tab.url||''))throw new Error('La pestaña actual ya no muestra una búsqueda compatible de Google Maps.');
   const params=message.params||{};
   const searchUrl=String(params.searchUrl||tab.url||'');
-  if(searchSourceKey(searchUrl)!==searchSourceKey(tab.url||''))
-    throw new Error('La URL cambió antes de guardar la recarga; no se modificó la búsqueda.');
+  if(!supportedSearchUrl(searchUrl))throw new Error('La búsqueda guardada no es una URL compatible de Google Maps.');
   const stored=await chrome.storage.local.get([CAMPAIGN_KEY,'glcsv_state']);
   const state=stored.glcsv_state||{};
   const campaign=stored[CAMPAIGN_KEY];
+  const sameCurrentSearch=supportedSearchUrl(tab.url||'')&&searchSourceKey(searchUrl)===searchSourceKey(tab.url||'');
+  const restoreSavedSearch=state.tabId===tabId&&supportedSearchUrl(state.searchUrl||'')&&
+    searchSourceKey(state.searchUrl)===searchSourceKey(searchUrl)&&!sameCurrentSearch;
+  if(!sameCurrentSearch&&!restoreSavedSearch)
+    throw new Error('La URL cambió y no coincide con la búsqueda guardada; no se modificó la pestaña.');
   if(params.campaignId) {
     const activeItem=campaign?.queries?.[campaign.index];
     if(campaign?.id!==params.campaignId||campaign.status==='paused'||activeItem?.query!==params.campaignQuery)
@@ -478,16 +484,22 @@ async function reloadMapsForRecovery(message,sender) {
     limit:Math.max(0,Number(params.limit)||0),country:String(params.country||'auto'),
     parallelTabs:Math.max(1,Math.min(20,Number(params.parallelTabs)||5)),
     campaignId:String(params.campaignId||''),campaignQuery:String(params.campaignQuery||''),
-    scrollTop:Math.max(0,Number(params.scrollTop)||0),createdAt:Date.now(),resuming:false
+    scrollTop:Math.max(0,Number(params.scrollTop)||0),urlBeforeRestore:tab.url||'',restoreSavedSearch,createdAt:Date.now(),resuming:false
   };
   await chrome.storage.local.set({[MAPS_RELOAD_KEY]:marker});
-  await appendBackgroundLog('warn','Recarga automática de Maps programada para destrabar el feed',{
+  await appendBackgroundLog('warn',restoreSavedSearch?'Restauración de la búsqueda guardada programada':'Recarga automática de Maps programada para destrabar el feed',{
     campaignId:marker.campaignId||undefined,query:marker.expectedQuery,tabId,
     rows:state.rows?.length||0,inspected:state.inspectedIds?.length||0,
     pendingDetails:state.pendingDetails?.length||0,scrollTop:marker.scrollTop,url:searchUrl
   });
   await endMapsWheelSession({tab:{id:tabId}});
-  await chrome.tabs.reload(tabId,{bypassCache:false});
+  if(restoreSavedSearch)await chrome.tabs.update(tabId,{url:searchUrl});
+  else await chrome.tabs.reload(tabId,{bypassCache:false});
+  const tabAfterRestore=await chrome.tabs.get(tabId);
+  await appendBackgroundLog('info',restoreSavedSearch?'Navegación para restaurar URL solicitada':'Recarga de URL de búsqueda solicitada',{
+    tabId,method:restoreSavedSearch?'tabs.update':'tabs.reload',urlBefore:marker.urlBeforeRestore,
+    urlExpected:searchUrl,urlAtRequest:tabAfterRestore.url||'',navigationRequested:true,searchKeyExpected:marker.searchKey
+  });
   return {ok:true,reloading:true,tabId};
 }
 
@@ -569,7 +581,7 @@ async function stopSavedSearch() {
   const next={...state,status:stillRunning?'running':'paused',message:stillRunning?'Deteniendo extracción. El progreso quedó guardado.':'Extracción detenida. Puedes continuar desde el progreso guardado.',updatedAt:Date.now()};
   const logs=Array.isArray(next.logs)?next.logs:[];
   logs.push({time:new Date().toISOString(),level:'info',event:'Solicitud para detener la extracción',details:{tabId:state.tabId,stillRunning,rows:state.rows?.length||0}});
-  next.logs=logs.slice(-200);
+  next.logs=logs.slice(-4000);
   await chrome.storage.local.set({glcsv_state:next});
   return {ok:true};
 }
