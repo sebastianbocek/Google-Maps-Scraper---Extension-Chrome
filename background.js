@@ -413,6 +413,17 @@ async function finishCampaignQuery(message) {
   const currentLabel=currentItem?.label||'ubicación actual';
   const confirmedEnd=Boolean(message.endMarkerConfirmed&&['complete','limit'].includes(message.reason));
   const emptyViewAdvance=message.reason==='empty-view'&&!message.endMarkerConfirmed;
+  const enrichmentComplete=message.enrichmentComplete===true&&Number(message.pendingDetails||0)===0;
+  if((confirmedEnd||emptyViewAdvance)&&!enrichmentComplete) {
+    const text=`La búsqueda de ${currentLabel} llegó al final, pero todavía hay fichas pendientes de enriquecer. La campaña quedó pausada y no avanzó.`;
+    await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:text,updatedAt:Date.now()}});
+    await appendBackgroundLog('warn','Avance de ciudad bloqueado: quedan fichas de enriquecimiento pendientes',{
+      campaignId:campaign.id,index:campaign.index+1,total:campaign.queries.length,
+      location:currentLabel,reason:message.reason,rows:message.rows||0,
+      endMarkerConfirmed:Boolean(message.endMarkerConfirmed),pendingDetails:Number(message.pendingDetails)||0
+    });
+    return {ok:true,paused:true,blocked:true};
+  }
   if(!confirmedEnd&&!emptyViewAdvance) {
     const text=`La búsqueda de ${currentLabel} no confirmó “No hay más resultados”; no se avanzó a otra ciudad. Podés continuar desde aquí.`;
     await chrome.storage.local.set({[CAMPAIGN_KEY]:{...campaign,status:'paused',message:text,updatedAt:Date.now()}});

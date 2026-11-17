@@ -525,21 +525,6 @@
     const after=resultsSnapshot(scroller);
     return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,spinnerDetected,...outcome};
   }
-  async function restorePreviouslyLoadedResults(targetCount,maxSteps=80) {
-    let steps=0,lastCount=selectCards().length;
-    while(steps<maxSteps&&!stopped) {
-      const cards=selectCards();
-      if(cards.length>=targetCount)return {restored:true,steps,cards:cards.length,targetCount};
-      if(hasNoMoreResults())return {restored:false,endReached:true,steps,cards:cards.length,targetCount};
-      const scroll=await advanceResults(cards);
-      steps++;
-      const currentCount=selectCards().length;
-      if(currentCount>lastCount)lastCount=currentCount;
-      if(scroll.timedOut)break;
-    }
-    const cards=selectCards();
-    return {restored:cards.length>=targetCount,endReached:hasNoMoreResults(),steps,cards:cards.length,targetCount,lastCount};
-  }
   function restoreResultsPosition(position) {
     const scroller=getScrollTarget(selectCards());
     if(!scroller)return {restored:false,top:window.scrollY};
@@ -567,29 +552,6 @@
     logEvent(state,"info","Clic en volver a resultados enviado",{context,selector:targetSelector,label,clicked:true,urlBefore,urlAfter:location.href});
     return true;
   }
-  function submitCurrentMapsSearch(expectedQuery,state=null,context="restore-search-query") {
-    const input=mapsSearchInput();
-    const actualQuery=plain(input?.value||"");
-    if(!input||!expectedQuery||canonical(actualQuery)!==canonical(expectedQuery)) {
-      logEvent(state,"warn","No se reenvió la búsqueda guardada porque el cuadro no coincide",{
-        context,expectedQuery,actualQuery,selector:input?"input#searchboxinput,input[role=combobox]":"search-input-not-found",clicked:false,urlBefore:location.href
-      });
-      return false;
-    }
-    const selector='button#searchbox-searchbutton,button[aria-label*="search" i],button[aria-label*="buscar" i],button[title*="search" i],button[title*="buscar" i]';
-    const target=[...document.querySelectorAll(selector)].find(el=>!el.closest("#glcsv-float")&&rect(el).width>0&&rect(el).height>0);
-    if(!target) {
-      logEvent(state,"warn","No se encontró el botón para reenviar la búsqueda guardada",{context,selector,expectedQuery,clicked:false,urlBefore:location.href});
-      return false;
-    }
-    const actualSelector=target.id?`${target.tagName.toLowerCase()}#${target.id}`:
-      target.getAttribute("aria-label")?`${target.tagName.toLowerCase()}[aria-label="${target.getAttribute("aria-label")}"]`:
-      `${target.tagName.toLowerCase()}[title="${target.getAttribute("title")||""}"]`;
-    const urlBefore=location.href;
-    target.click();
-    logEvent(state,"info","Búsqueda guardada reenviada desde Maps",{context,selector:actualSelector,expectedQuery,actualQuery,clicked:true,urlBefore,urlAfter:location.href});
-    return true;
-  }
   async function restoreSearchAfterRecovery(previousUrl,position,expectedName="",state=null,searchUrl="") {
     const started=Date.now();
     const urlBefore=location.href;
@@ -601,7 +563,7 @@
       returnMethod="history.back";
       history.back();
     }
-    let lastReturnAttempt=Date.now(),searchResubmitAttempted=false,searchResubmitted=false;
+    let lastReturnAttempt=Date.now();
     while(Date.now()-started<9000&&!stopped) {
       const queryMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
       const searchRoute=/\/maps\/search(?:\/|$)/i.test(location.pathname);
@@ -620,13 +582,19 @@
         logEvent(state,"info","Retorno a resultados completado",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),searchMatchesOriginal:result.searchMatchesOriginal,positionBefore:position,positionAfter:second,cards:selectCards().length});
         return result;
       }
-      if(!searchResubmitAttempted&&Date.now()-started>1500&&/\/maps\/place\//i.test(location.pathname)) {
-        searchResubmitAttempted=true;
-        searchResubmitted=submitCurrentMapsSearch(expectedQuery,state,"return-to-results");
-        if(searchResubmitted)returnMethod="resubmit-saved-query";
-      }
-      if(!searchResubmitted&&Date.now()-lastReturnAttempt>1500&&/\/maps\/place\//i.test(location.pathname)) {
-        if(clickMapsResultsBack(state,"retry-return-to-results"))lastReturnAttempt=Date.now();
+      if(Date.now()-lastReturnAttempt>1500&&/\/maps\/place\//i.test(location.pathname)) {
+        if(returnMethod==="maps-results-back") {
+          returnMethod="history.back";
+          const retryUrlBefore=location.href;
+          history.back();
+          logEvent(state,"info","Se reintentó volver a resultados con el historial del navegador",{
+            context:"retry-return-to-results",urlBefore:retryUrlBefore,urlAfter:location.href
+          });
+        } else {
+          returnMethod="maps-results-back-retry";
+          clickMapsResultsBack(state,"retry-return-to-results");
+        }
+        lastReturnAttempt=Date.now();
       }
       await wait(180);
     }
@@ -706,7 +674,18 @@
   function hasNoMoreResults() {
     const endings=new Set(["no hay mas resultados","no more results"]);
     const scope=document.querySelector('div[role="feed"]')||document.querySelector('[data-results-container]')||getScrollTarget(selectCards())||document.body;
-    const containsEndMarker=text=>String(text||"").split(/[\n\r]+/).some(line=>endings.has(canonical(line).replace(/[.!?…]+$/g,"").trim()));
+    const normalizeEndMarker=text=>canonical(text).replace(/[.!?…]+$/g,"").trim();
+    // Maps renders this status as its own text element below the final card.
+    // Check it directly (the extension-side equivalent of an exact getByText)
+    // because it may sit outside the scrolling feed element.
+    const exactMarker=scope!==document.body&&[...scope.querySelectorAll("div,span,p,[role='status']")].some(el=>{
+      if(el.closest("#glcsv-float"))return false;
+      const r=el.getBoundingClientRect(),style=getComputedStyle(el);
+      return r.width>0&&r.height>0&&style.visibility!=="hidden"&&style.display!=="none"&&
+        endings.has(normalizeEndMarker(el.innerText||el.textContent));
+    });
+    if(exactMarker)return true;
+    const containsEndMarker=text=>String(text||"").split(/[\n\r]+/).some(line=>endings.has(normalizeEndMarker(line)));
     if(containsEndMarker(scope?.innerText))return true;
     return scope!==document.body&&containsEndMarker(document.body?.innerText);
   }
@@ -973,28 +952,7 @@
         }
         const endMarkerVisible=Boolean(scroll.endReached||hasNoMoreResults());
         endReached=endMarkerVisible&&!hasNew;
-        let listResetRecovery=null;
-        // Al volver desde una ficha, Maps puede reconstruir el feed en el
-        // comienzo (por ejemplo, 118 tarjetas pasan a 8 y scrollTop a 0).
-        // Recupera el tramo ya cargado antes de iniciar otro ciclo de scroll.
-        const countDropped=Number(scroll.cardsBefore)>=30&&Number(scroll.cardsAfter)<Number(scroll.cardsBefore)*.45;
-        const jumpedToStart=Number(scroll.topBefore)>1000&&Number(scroll.topAfter)<1000;
-        if(!endReached&&!stopped&&countDropped&&jumpedToStart) {
-          logEvent(state,"warn","Maps reinició la lista; recuperando el tramo cargado antes de continuar",{
-            cardsBefore:scroll.cardsBefore,cardsAfter:scroll.cardsAfter,topBefore:scroll.topBefore,topAfter:scroll.topAfter
-          });
-          listResetRecovery=await restorePreviouslyLoadedResults(Number(scroll.cardsBefore),80);
-          hasNew=selectCards().some(c=>!inspected.has(c.key));
-          const restoredEnd=Boolean(listResetRecovery.endReached||hasNoMoreResults());
-          endReached=restoredEnd&&!hasNew;
-          if(listResetRecovery.restored)noProgress=0;
-          logEvent(state,listResetRecovery.restored?"info":"warn",listResetRecovery.restored?
-            "Tramo previamente cargado recuperado; retomando desde las fichas nuevas":
-            "No se pudo recuperar todo el tramo anterior; se conserva la misma ciudad y se sigue cargando",{
-              ...listResetRecovery,hasUnseenCard:hasNew,endReached
-            });
-        }
-        const resultsAdvanced=Boolean(hasNew||scroll.newResults||count>0||listResetRecovery?.restored);
+        const resultsAdvanced=Boolean(hasNew||scroll.newResults||count>0);
         if(resultsAdvanced)priorCardRecoveryTried.clear();
         const waitingForResumeFrontier=awaitingResumeFrontier&&!reachedFrontierThisScroll;
         const noProgressResetReason=waitingForResumeFrontier?"awaiting-resume-frontier":endReached?"end-reached":resultsAdvanced?(hasNew||scroll.newResults?"new-results":"cards-processed"):"no-new-results";
@@ -1094,13 +1052,23 @@
           endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,noProgressResetReason,awaitingResumeFrontier,reachedFrontierThisScroll,endReached,listResetRecovery,spinnerRecovery,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,noProgressResetReason,awaitingResumeFrontier,reachedFrontierThisScroll,endReached,spinnerRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();
         showOverlay(state.message);
       }
-      if(stopped)await settleActiveDetails();else await drainDetailQueue();
+      if(stopped)await settleActiveDetails();
+      else {
+        if(campaignId&&endReached&&(detailQueue.length||activeDetails||pendingDetails.size)) {
+          state.message=`Maps llegó al final. Esperando el enriquecimiento de ${pendingDetails.size} fichas…`;
+          showOverlay(state.message);
+          logEvent(state,"info","Fin de resultados detectado; esperando que terminen las pestañas de enriquecimiento",{
+            campaignId,campaignQuery,queued:detailQueue.length,active:activeDetails,pending:pendingDetails.size
+          });
+        }
+        await drainDetailQueue();
+      }
       // Una campaña no cambia de ciudad ni deja fichas atrás: Maps ya confirmó
       // el fin, así que reabrimos las fichas fallidas hasta completar la cola.
       // El usuario puede detener la campaña mientras espera/reintenta.
@@ -1117,6 +1085,14 @@
         pumpDetailQueue();
         await drainDetailQueue();
         if(pendingDetails.size&&!stopped)await wait(Math.min(5000,1000*pendingRetryRound));
+      }
+      const enrichmentComplete=detailQueue.length===0&&activeDetails===0&&pendingDetails.size===0;
+      if(campaignId&&endReached&&!stopped) {
+        logEvent(state,enrichmentComplete?"info":"warn",enrichmentComplete?
+          "Enriquecimiento completo; la campaña puede avanzar a la siguiente ciudad":
+          "La campaña no avanzará porque quedan fichas de enriquecimiento pendientes",{
+            campaignId,campaignQuery,queued:detailQueue.length,active:activeDetails,pending:pendingDetails.size
+          });
       }
       if(!endReached&&hasNoMoreResults()&&!selectCards().some(card=>!inspected.has(card.key)))endReached=true;
       const limitReached=limit>0&&queryProcessed>=limit;
@@ -1160,7 +1136,7 @@
       running=false;
       currentRun=null;
       stopped=false;
-      if(campaignId&&!reloadRequested)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,rows:rows.size}).catch(()=>{});
+      if(campaignId&&!reloadRequested)chrome.runtime.sendMessage({type:"GLCSV_CAMPAIGN_QUERY_FINISHED",campaignId,campaignQuery,reason:finishReason,endMarkerConfirmed:endReached,enrichmentComplete:detailQueue.length===0&&activeDetails===0&&pendingDetails.size===0,pendingDetails:pendingDetails.size,rows:rows.size}).catch(()=>{});
     }
   }
   chrome.runtime.onMessage.addListener((message,_sender,sendResponse) => {
