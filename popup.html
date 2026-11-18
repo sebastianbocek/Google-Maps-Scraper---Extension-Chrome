@@ -30,8 +30,8 @@
       <label class="field-label" for="campaignQuery">Rubro o negocio</label>
       <input id="campaignQuery" type="search" maxlength="160" placeholder="Ej.: marketing digital" autocomplete="off" />
       <label class="field-label" for="campaignCountry">País</label>
-      <select id="campaignCountry"><option value="AR">Argentina</option></select>
-      <label class="field-label" for="campaignProvinces">Provincias o estados (opcional)</label>
+      <select id="campaignCountry"><option value="AR">Argentina</option><option value="ES">España</option></select>
+      <label id="campaignProvinceLabel" class="field-label" for="campaignProvinces">Provincias (opcional)</label>
       <div id="campaignProvinces" class="province-list" role="group" aria-label="Provincias de Argentina" aria-describedby="campaignProvinceHint"></div>
       <p id="campaignProvinceHint" class="hint">Marcá provincias para limitar la campaña. Si no marcás ninguna, recorrerá las ciudades cargadas de todas las provincias de Argentina, una por una. El máximo de fichas se aplica a cada ciudad.</p>
       <button id="campaignStart" class="primary">▶ Iniciar búsqueda por ciudades</button>
@@ -125,6 +125,7 @@
   </main>
   <script src="data_utils.js"></script>
   <script src="locations_ar.js"></script>
+  <script src="locations_es.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

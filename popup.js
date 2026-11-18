@@ -3,7 +3,7 @@
   "use strict";
   const util=globalThis.GLCSVUtil;
   const $=id=>document.getElementById(id);
-  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","parallelTabs","start","stop","download","clear","selectAllCategories","clearCategorySelection",
+  const names=["page","searchQuery","searchStart","resume","campaignQuery","campaignCountry","campaignProvinces","campaignProvinceHint","campaignProvinceLabel","campaignStart","campaignPause","campaignResume","campaignStatus","logPanel","logCount","logOutput","copyLog","total","phoneCount","webCount","status","limit","parallelTabs","start","stop","download","clear","selectAllCategories","clearCategorySelection",
     "categories","categoryCount","locations","locationCount","targetLocation","strictLocation","locationHint","country","whatsappMessage","exportCount","websiteMode","phoneMode"];
   const els=Object.fromEntries(names.map(id=>[id,$(id)]));
   const STATE_KEY="glcsv_state", FILTER_KEY="glcsv_filters", SETTINGS_KEY="glcsv_settings", CAMPAIGN_KEY="glcsv_campaign", CAMPAIGN_LOG_KEY="glcsv_campaign_logs";
@@ -15,12 +15,27 @@
   let campaignState={status:"idle",message:"Sin campaña activa.",index:0,queries:[]},campaignLogs=[];
   let loading=true,stateReady=false,renderTimer=0;
   const UNKNOWN="__unknown__";
-  for(const province of Object.keys(globalThis.GLCSVLocations||{})) {
-    const label=document.createElement("label");label.className="province-option";
-    const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=province;
-    const name=document.createElement("span");name.textContent=province;
-    label.append(checkbox,name);els.campaignProvinces.appendChild(label);
+  function campaignLocationMap(country=els.campaignCountry.value) {
+    return country==="ES"?(globalThis.GLCSVLocationsES||{}):(globalThis.GLCSVLocations||{});
   }
+  function renderCampaignProvinceOptions(selectedValues=[]) {
+    const country=els.campaignCountry.value||"AR";
+    const isSpain=country==="ES";
+    els.campaignProvinces.replaceChildren();
+    for(const province of Object.keys(campaignLocationMap(country))) {
+      const label=document.createElement("label");label.className="province-option";
+      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=province;
+      checkbox.checked=selectedValues.includes(province);
+      const name=document.createElement("span");name.textContent=province;
+      label.append(checkbox,name);els.campaignProvinces.appendChild(label);
+    }
+    els.campaignProvinces.setAttribute("aria-label",isSpain?"Provincias de España":"Provincias de Argentina");
+    els.campaignProvinceLabel.textContent=isSpain?"Provincias (opcional)":"Provincias (opcional)";
+    els.campaignProvinceHint.textContent=isSpain?
+      "Marcá provincias para limitar la campaña. Si no marcás ninguna, recorrerá las ciudades cargadas de todas las provincias de España. El máximo de fichas se aplica a cada ciudad.":
+      "Marcá provincias para limitar la campaña. Si no marcás ninguna, recorrerá las ciudades cargadas de todas las provincias de Argentina. El máximo de fichas se aplica a cada ciudad.";
+  }
+  renderCampaignProvinceOptions(settings.campaignProvinces);
   function sourceKey(url) {
     try {
       const u=new URL(url),query=u.searchParams.get("q")||u.searchParams.get("query")||decodeURIComponent(u.pathname.match(/\/maps\/search\/([^/]+)/)?.[1]||"");
@@ -248,6 +263,8 @@
     const config=await chrome.storage.local.get([FILTER_KEY,SETTINGS_KEY,CAMPAIGN_KEY]);
     settings={country:"auto",limit:0,parallelTabs:5,searchQuery:"",whatsappMessage:"",campaignQuery:"",campaignCountry:"AR",campaignProvinces:[],...(config[SETTINGS_KEY]||{})};
     settings.parallelTabs=clampParallelTabs(settings.parallelTabs);
+    els.campaignCountry.value=settings.campaignCountry||"AR";
+    renderCampaignProvinceOptions(settings.campaignProvinces||[]);
     campaignState=config[CAMPAIGN_KEY]||campaignState;
     loading=false;
     render();
@@ -399,7 +416,14 @@
     }
   }
   els.searchStart.addEventListener("click",startSearchFromPopup);
-  for(const field of [els.campaignQuery,els.campaignCountry,els.campaignProvinces]) {
+  els.campaignCountry.addEventListener("change",async ()=>{
+    settings.campaignCountry=els.campaignCountry.value;
+    settings.campaignProvinces=[];
+    renderCampaignProvinceOptions([]);
+    await saveCampaignForm();
+    render();
+  });
+  for(const field of [els.campaignQuery,els.campaignProvinces]) {
     field.addEventListener("input",()=>{
       settings.campaignQuery=els.campaignQuery.value;
       els.campaignStart.disabled=!stateReady||campaignState.status==="running"||campaignState.status==="starting"||state.status==="running"||!settings.campaignQuery.trim();
@@ -412,10 +436,12 @@
     if(!query)return;
     if(state.status==="running"||campaignState.status==="running"||campaignState.status==="starting") {message("Detené la extracción activa antes de iniciar una campaña.");return;}
     const provinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
-    const locations=globalThis.GLCSVLocations||{};
+    const country=els.campaignCountry.value||"AR";
+    const locations=campaignLocationMap(country);
+    const countryName=country==="ES"?"España":"Argentina";
     const provincesToSearch=provinces.length?provinces:Object.keys(locations);
-    const queries=provincesToSearch.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, Argentina` })));
-    if(!queries.length){message("No hay ciudades cargadas para las provincias seleccionadas.");return;}
+    const queries=provincesToSearch.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, ${countryName}` })));
+    if(!queries.length){message(`No hay ciudades cargadas para las provincias seleccionadas de ${countryName}.`);return;}
     if(rows().length&&!confirm("La campaña nueva va a reemplazar los resultados guardados al iniciar su primera búsqueda. ¿Continuar?"))return;
     let limit=Number.parseInt(els.limit.value,10);
     if(!Number.isFinite(limit)||limit<0)limit=0;
