@@ -22,7 +22,7 @@
 
 - Extrae fichas de negocios visibles en Google Maps y Google Local.
 - Permite escribir una búsqueda en el panel; abre Google Maps en una pestaña nueva e inicia la extracción.
-- Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias de Argentina o España y acumular sus resultados en el mismo CSV.
+- Incluye un modo de campaña para recorrer en secuencia las ciudades de una o varias provincias de Argentina y España, o estados de Estados Unidos, y acumular sus resultados en el mismo CSV.
 - Guarda nombre, teléfono, valoración, categoría, sitio web, enlace de WhatsApp y URL de la ficha de Google Maps cuando están disponibles.
 - Omite fichas duplicadas durante el recorrido y vuelve a depurar registros guardados antes de exportar; compara el identificador de Google Maps y, si no está disponible, nombre más dirección o teléfono.
 - Acelera el recorrido con una cola asíncrona: mientras Maps sigue cargando resultados, procesa fichas en paralelo en pestañas inactivas temporales, sin API ni endpoints privados.
@@ -54,7 +54,7 @@
 5. Selecciona la carpeta **Google Maps Scraper - Extension Chrome** que contiene `manifest.json`.
 6. Abre la extensión, escribe una búsqueda, por ejemplo “cafeterías en Palermo”, y haz clic en **Buscar y comenzar extracción**. Se abrirá Google Maps en una pestaña nueva y la extracción comenzará automáticamente.
 7. Puedes cambiar de pestaña mientras se extraen los resultados. Si la extracción se detiene, pulsa **Continuar extracción guardada** para retomar el progreso; si hace falta, la extensión volverá a abrir Maps en segundo plano. Si Chrome reinicia o actualiza la extensión durante una campaña, el avance persistido queda pausado para que puedas continuar.
-8. Para buscar en varias ciudades, usa **Búsqueda por varias ciudades** debajo del buscador normal. Escribe el rubro, elige Argentina o España y marca una o más provincias; desmarca una casilla para quitar una provincia. La campaña buscará en cada ciudad de las provincias marcadas, en orden, y acumulará los resultados. Si no marcas ninguna, recorrerá las ciudades cargadas del país seleccionado, una por una.
+8. Para buscar en varias ciudades, usa **Búsqueda por varias ciudades** debajo del buscador normal. Escribe el rubro, elige un país y marca una o más provincias o estados; desmarca una casilla para quitarla. La campaña buscará en cada ciudad seleccionada, en orden, y acumulará los resultados. Si no marcas ninguna, recorrerá las ciudades cargadas del país seleccionado, una por una.
 9. La campaña avanza automáticamente cuando Maps deja de cargar resultados en una ciudad. Puedes pausarla y continuarla desde la ubicación en curso; al reanudar, conserva la pestaña y omite las fichas ya procesadas.
 10. También puedes abrir [Google Maps](https://www.google.com/maps), realizar una búsqueda y comenzar la extracción desde el panel.
 11. En **Limpiar CSV**, marca las categorías que quieres conservar; puedes seleccionarlas todas o ninguna. Elige también si quieres todos los negocios o solo los que tengan o no tengan sitio web y teléfono. Los perfiles de Instagram y Facebook cuentan como negocios sin sitio web. También puedes excluir ciudades, elegir una ubicación objetivo y definir un mensaje opcional para los enlaces de WhatsApp.
@@ -81,7 +81,7 @@ Si ya tienes una versión instalada, conserva la misma carpeta de instalación: 
 - `content.js`: lectura y extracción de fichas desde Google.
 - `data_utils.js`, `quick_whatsapp.js`: utilidades de datos y acceso rápido a WhatsApp.
 - `background.js`: servicio en segundo plano y descarga.
-- `locations_ar.js` y `locations_es.js`: catálogos de provincias y ciudades para las campañas de Argentina y España.
+- `locations_ar.js`, `locations_es.js` y `locations_us.js`: catálogos geográficos para las campañas de Argentina, España y Estados Unidos.
 - `assets/demo.gif`, `assets/demo.mp4`: muestra animada y video original.
 
 ## Privacidad y límites

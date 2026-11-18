@@ -16,11 +16,14 @@
   let loading=true,stateReady=false,renderTimer=0;
   const UNKNOWN="__unknown__";
   function campaignLocationMap(country=els.campaignCountry.value) {
-    return country==="ES"?(globalThis.GLCSVLocationsES||{}):(globalThis.GLCSVLocations||{});
+    if(country==="ES") return globalThis.GLCSVLocationsES||{};
+    if(country==="US") return globalThis.GLCSVLocationsUS||{};
+    return globalThis.GLCSVLocations||{};
   }
   function renderCampaignProvinceOptions(selectedValues=[]) {
     const country=els.campaignCountry.value||"AR";
     const isSpain=country==="ES";
+    const isUS=country==="US";
     els.campaignProvinces.replaceChildren();
     for(const province of Object.keys(campaignLocationMap(country))) {
       const label=document.createElement("label");label.className="province-option";
@@ -29,11 +32,11 @@
       const name=document.createElement("span");name.textContent=province;
       label.append(checkbox,name);els.campaignProvinces.appendChild(label);
     }
-    els.campaignProvinces.setAttribute("aria-label",isSpain?"Provincias de España":"Provincias de Argentina");
-    els.campaignProvinceLabel.textContent=isSpain?"Provincias (opcional)":"Provincias (opcional)";
-    els.campaignProvinceHint.textContent=isSpain?
-      "Marcá provincias para limitar la campaña. Si no marcás ninguna, recorrerá las ciudades cargadas de todas las provincias de España. El máximo de fichas se aplica a cada ciudad.":
-      "Marcá provincias para limitar la campaña. Si no marcás ninguna, recorrerá las ciudades cargadas de todas las provincias de Argentina. El máximo de fichas se aplica a cada ciudad.";
+    const regionLabel=isUS?"Estados": "Provincias";
+    const countryName=isSpain?"España":isUS?"Estados Unidos":"Argentina";
+    els.campaignProvinces.setAttribute("aria-label",`${regionLabel} de ${countryName}`);
+    els.campaignProvinceLabel.textContent=`${regionLabel} (opcional)`;
+    els.campaignProvinceHint.textContent=`Marcá ${isUS?"estados":"provincias"} para limitar la campaña. Si no marcás ninguno, recorrerá las ciudades cargadas de todos los ${isUS?"estados":"provincias"} de ${countryName}. El máximo de fichas se aplica a cada ciudad.`;
   }
   renderCampaignProvinceOptions(settings.campaignProvinces);
   function sourceKey(url) {
@@ -438,7 +441,7 @@
     const provinces=[...els.campaignProvinces.querySelectorAll('input[type="checkbox"]:checked')].map(checkbox=>checkbox.value);
     const country=els.campaignCountry.value||"AR";
     const locations=campaignLocationMap(country);
-    const countryName=country==="ES"?"España":"Argentina";
+    const countryName=country==="ES"?"España":country==="US"?"Estados Unidos":"Argentina";
     const provincesToSearch=provinces.length?provinces:Object.keys(locations);
     const queries=provincesToSearch.flatMap(province=>(locations[province]||[]).map(city=>({label:`${city}, ${province}`,query:`${query} cerca de ${city}, ${province}, ${countryName}` })));
     if(!queries.length){message(`No hay ciudades cargadas para las provincias seleccionadas de ${countryName}.`);return;}
