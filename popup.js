@@ -36,7 +36,7 @@
     const countryName=isSpain?"España":isUS?"Estados Unidos":"Argentina";
     els.campaignProvinces.setAttribute("aria-label",`${regionLabel} de ${countryName}`);
     els.campaignProvinceLabel.textContent=`${regionLabel} (opcional)`;
-    els.campaignProvinceHint.textContent=`Marcá ${isUS?"estados":"provincias"} para limitar la campaña. Si no marcás ninguno, recorrerá las ciudades cargadas de todos los ${isUS?"estados":"provincias"} de ${countryName}. El máximo de fichas se aplica a cada ciudad.`;
+    els.campaignProvinceHint.textContent=`Marcá ${isUS?"estados":"provincias"} para limitar la campaña. Si no marcás ${isUS?"ninguno":"ninguna"}, recorrerá las ciudades cargadas de ${isUS?"todos los estados":"todas las provincias"} de ${countryName}. El máximo de fichas se aplica a cada ciudad.`;
   }
   renderCampaignProvinceOptions(settings.campaignProvinces);
   function sourceKey(url) {
