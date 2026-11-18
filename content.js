@@ -525,22 +525,22 @@
     const after=resultsSnapshot(scroller);
     return {moved:after.top!==old||outcome.newResults||outcome.feedChanged,method:"mouse-wheel",target,topBefore:old,topAfter:after.top,maxTop,clientHeight:scroller.clientHeight,scrollHeight:scroller.scrollHeight,cardsBefore:before.count,cardsAfter:after.count,wheel,spinnerDetected,...outcome};
   }
-  function restoreResultsPosition(position) {
-    const scroller=getScrollTarget(selectCards());
-    if(!scroller)return {restored:false,top:window.scrollY};
-    const top=Math.min(Number(position?.top)||0,Math.max(0,scroller.scrollHeight-scroller.clientHeight));
-    scroller.scrollTop=top;
-    scroller.dispatchEvent(new Event("scroll",{bubbles:true}));
-    return {restored:true,top:scroller.scrollTop};
-  }
   function clickMapsResultsBack(state=null,context="return-to-results") {
     const selector='button,[role="button"]';
     const candidates=[...document.querySelectorAll(selector)].filter(el=>{
       if(el.closest("#glcsv-float"))return false;
       const label=canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""} ${safeText(el)}`);
       const r=rect(el);
-      return r.width>0&&r.height>0&&r.top<190&&r.left<innerWidth*.65&&/(back|volver|atras|regresar)/.test(label);
-    }).sort((a,b)=>rect(a).top-rect(b).top||rect(a).left-rect(b).left);
+      if(r.width<=0||r.height<=0||r.top>=190||r.left>=innerWidth*.65)return false;
+      if(/(?:back|volver|atras|regresar)/.test(label))return true;
+      // Never click "Cerrar/Close": Maps uses that label both for closing a
+      // place panel and clearing the current search. Use navigation/history.
+      return false;
+    }).sort((a,b)=>{
+      const label=el=>canonical(`${el.getAttribute("aria-label")||""} ${el.getAttribute("title")||""} ${safeText(el)}`);
+      const score=el=>/(?:back|volver|atras|regresar)/.test(label(el))?0:1;
+      return score(a)-score(b)||rect(a).top-rect(b).top||rect(a).left-rect(b).left;
+    });
     const target=candidates[0];
     if(!target)return false;
     const label=target.getAttribute("aria-label")||target.getAttribute("title")||plain(safeText(target));
@@ -559,16 +559,17 @@
     const expectedQuery=utils.fromSearch(expectedSearchUrl);
     let returnMethod="maps-results-back";
     logEvent(state,"info","Inicio de retorno a resultados",{method:returnMethod,urlBefore,expectedSearchUrl,expectedQuery,expectedName,position});
+    let historyBackAttempts=0;
     if(!clickMapsResultsBack(state,"return-to-results")) {
       returnMethod="history.back";
+      historyBackAttempts++;
       history.back();
     }
     let lastReturnAttempt=Date.now();
-    while(Date.now()-started<9000&&!stopped) {
+    while(Date.now()-started<8000&&!stopped) {
       const queryMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
       const searchRoute=/\/maps\/search(?:\/|$)/i.test(location.pathname);
       if(searchRoute&&selectCards().length&&queryMatches) {
-        const first=restoreResultsPosition(position);
         await wait(260);
         const stillOnSearchRoute=/\/maps\/search(?:\/|$)/i.test(location.pathname);
         const queryStillMatches=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
@@ -577,26 +578,37 @@
           await wait(180);
           continue;
         }
-        const second=restoreResultsPosition(position);
-        const result={ok:true,position:first,positionAfterRender:second,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(expectedSearchUrl)};
-        logEvent(state,"info","Retorno a resultados completado",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),searchMatchesOriginal:result.searchMatchesOriginal,positionBefore:position,positionAfter:second,cards:selectCards().length});
+        const result={ok:true,url:location.href,searchMatchesOriginal:sourceKey(location.href)===sourceKey(expectedSearchUrl)};
+        logEvent(state,"info","Retorno a resultados completado",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),searchMatchesOriginal:result.searchMatchesOriginal,position:captureResultsPosition(),cards:selectCards().length});
         return result;
       }
-      if(Date.now()-lastReturnAttempt>1500&&/\/maps\/place\//i.test(location.pathname)) {
-        if(returnMethod==="maps-results-back") {
-          returnMethod="history.back";
-          const retryUrlBefore=location.href;
-          history.back();
-          logEvent(state,"info","Se reintentó volver a resultados con el historial del navegador",{
-            context:"retry-return-to-results",urlBefore:retryUrlBefore,urlAfter:location.href
-          });
-        } else {
-          returnMethod="maps-results-back-retry";
-          clickMapsResultsBack(state,"retry-return-to-results");
-        }
+      if(Date.now()-lastReturnAttempt>900&&/\/maps\/place\//i.test(location.pathname)&&historyBackAttempts<4) {
+        // When one business detail was opened from another, Maps history
+        // first returns to the previous business (often the first card).
+        // Keep backing through those detail entries until the search feed is
+        // restored; never use Maps' close button, which can clear the query.
+        returnMethod="history.back-through-place-details";
+        const retryUrlBefore=location.href;
+        historyBackAttempts++;
+        history.back();
+        logEvent(state,"info","Se retrocedió una ficha anterior para volver a la lista de resultados",{
+          context:"retry-return-to-results",attempt:historyBackAttempts,maxAttempts:4,urlBefore:retryUrlBefore,urlAfter:location.href
+        });
         lastReturnAttempt=Date.now();
       }
       await wait(180);
+    }
+    const remainingCards=selectCards();
+    const queryStillPresent=!expectedQuery||canonical(mapsSearchValue())===canonical(expectedQuery);
+    const detailPanelStillOpen=/\/maps\/place\//i.test(location.pathname);
+    if(!stopped&&detailPanelStillOpen&&queryStillPresent&&remainingCards.length&&getScrollTarget(remainingCards)) {
+      const currentPosition=captureResultsPosition();
+      const result={ok:true,detailsPanelRemains:true,url:location.href,cards:remainingCards.length,position:currentPosition};
+      logEvent(state,"warn","Maps mantuvo abierta la ficha; continúo usando el feed visible sin recargar",{
+        method:returnMethod,expectedName,expectedQuery,searchQueryAfter:mapsSearchValue(),urlAfter:location.href,
+        cards:remainingCards.length,positionSaved:position,positionKept:currentPosition,scrollTop:currentPosition.top
+      });
+      return result;
     }
     logEvent(state,"error","No se pudo volver a resultados",{method:returnMethod,urlBefore,expectedSearchUrl,urlAfter:location.href,expectedQuery,searchQueryAfter:mapsSearchValue(),expectedName,cards:selectCards().length,elapsedMs:Date.now()-started});
     return {ok:false,url:location.href};
@@ -638,7 +650,7 @@
     if(!restored.ok)return {opened:true,restoreFailed:true,openedBy,details,urlAfter:restored.url,previousUrl,position};
     return {opened:true,openedBy,details,restored};
   }
-  async function scrollResultsToBottom(inspected,maxSteps=80) {
+  async function scrollResultsToBottom(inspected,maxSteps=80,state=null) {
     let steps=0,lastScroll=null;
     while(steps<maxSteps&&!stopped) {
       const cards=selectCards(),scroller=getScrollTarget(cards);
@@ -648,16 +660,17 @@
       steps++;
       const current=selectCards();
       const fresh=current.filter(item=>!inspected.has(item.key));
+      logEvent(state,"info","Desplazamiento de recuperación para comprobar nuevos resultados",{step:steps,method:lastScroll.method,topBefore:lastScroll.topBefore,topAfter:lastScroll.topAfter,newResults:Boolean(lastScroll.newResults),freshCards:fresh.length,endReached:Boolean(lastScroll.endReached)});
       if(fresh.length||lastScroll.newResults)return {newResults:true,newCount:fresh.length||Math.max(1,Number(lastScroll.cardsAfter)-Number(lastScroll.cardsBefore)),steps,lastScroll};
       const after=resultsSnapshot(getScrollTarget(current));
       if(lastScroll.endReached||hasNoMoreResults()||after.top<=before.top)break;
     }
     return {newResults:false,newCount:0,steps,lastScroll,endReached:hasNoMoreResults()};
   }
-  async function recoverSpinnerByReopeningPriorCards(inspected,recoveryTried,state) {
+  async function recoverSpinnerByReopeningPriorCards(inspected,recoveryTried,state,maxOpened=1) {
     const attempts=[];
     let openedCount=0;
-    while(!stopped&&openedCount<3) {
+    while(!stopped&&openedCount<maxOpened) {
       const card=selectCards().filter(item=>inspected.has(item.key)&&!recoveryTried.has(item.key)).at(-1);
       if(!card)break;
       recoveryTried.add(card.key);
@@ -665,7 +678,7 @@
       if(!openedResult.opened) {attempts.push({name:card.name,opened:false,reason:openedResult.reason});continue;}
       openedCount++;
       if(openedResult.restoreFailed)return {recovered:false,restoreFailed:true,card:card.name,attempts:[...attempts,{name:card.name,opened:true,restoreFailed:true}]};
-      const scrollToBottom=await scrollResultsToBottom(inspected);
+      const scrollToBottom=await scrollResultsToBottom(inspected,80,state);
       attempts.push({name:card.name,opened:true,openedBy:openedResult.openedBy,restored:openedResult.restored,scrollToBottom});
       if(scrollToBottom.newResults)return {recovered:true,newResults:true,newCount:scrollToBottom.newCount,openedCount,scrollAttempts:openedCount,attempts};
     }
@@ -756,7 +769,7 @@
     let activeDetails=0, stopDetailQueue=false, writesSinceCheckpoint=0, lastCheckpoint=Date.now();
     let persistChain=Promise.resolve();
     const keepResumeFrontier=campaignId?sameCampaignQuery:canResume;
-    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, lastReloadRecoveryAt:Number(existing.lastReloadRecoveryAt)||0, reloadResumeFrontier:keepResumeFrontier?String(existing.reloadResumeFrontier||""):"", awaitingResumeFrontier:Boolean(keepResumeFrontier&&existing.awaitingResumeFrontier&&existing.reloadResumeFrontier), ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
+    const state={rows:[...rows.values()], queryRows, inspectedIds:[...inspected], mainTabSkipIds:[], pendingDetails:[...pendingDetails.values()], logs:(campaignId?sameCampaign:canResume)&&Array.isArray(existing.logs)?existing.logs:[], status:"running", message:"Buscando fichas...", searchUrl, searchKey:key, tabId, schemaVersion:4, lastReloadRecoveryAt:Number(existing.lastReloadRecoveryAt)||0, reloadResumeFrontier:keepResumeFrontier?String(existing.reloadResumeFrontier||""):"", awaitingResumeFrontier:Boolean(keepResumeFrontier&&existing.awaitingResumeFrontier&&existing.reloadResumeFrontier), ...(campaignId?{campaignId,campaignQuery}:{}), updatedAt:Date.now()};
     const snapshot=()=>({...state,rows:[...rows.values()].map(row=>({...row})),queryRows:queryRows.map(row=>({...row})),inspectedIds:[...inspected],pendingDetails:[...pendingDetails.values()].map(row=>({...row})),logs:[...(state.logs||[])]});
     const saveSnapshot=()=>{const copy=snapshot();persistChain=persistChain.catch(()=>{}).then(()=>writeState(copy));lastCheckpoint=Date.now();return persistChain;};
     const scheduleCheckpoint=(force=false)=>{
@@ -778,7 +791,7 @@
       const task=(async()=>{
         try{
           const result=await chrome.runtime.sendMessage({type:"GLCSV_ENRICH_DETAIL",row:base});
-          if(result?.ok&&result.row){const detail={...result.row};mergeEnrichedRow(base,detail);pendingDetails.delete(base.businessUrl);logEvent(state,"info","Ficha enriquecida en segundo plano",{name:base.name,phone:Boolean(detail.phone),website:hasRealWebsite(detail.website),pending:pendingDetails.size});}
+          if(result?.ok&&result.row){const detail={...result.row};mergeEnrichedRow(base,detail);pendingDetails.delete(base.businessUrl);logEvent(state,"info","Ficha enriquecida en segundo plano",{name:base.name,phone:Boolean(detail.phone),website:hasRealWebsite(detail.website),email:Boolean(detail.email),pending:pendingDetails.size});}
           else logEvent(state,"warn","Ficha pendiente de enriquecer; se conserva para continuar",{name:base.name,error:result?.error||"Sin datos adicionales"});
         }catch(error){logEvent(state,"warn","Ficha pendiente de enriquecer; se conserva para continuar",{name:base.name,error:String(error?.message||error)});}
         finally{
@@ -840,13 +853,17 @@
         if(awaitingResumeFrontier) {
           const frontierCard=cards.find(card=>card.key===resumeFrontier);
           const scroller=getScrollTarget(cards),cardRect=frontierCard?rect(frontierCard.element):null,scrollRect=scroller?rect(scroller):null;
-          const frontierVisible=Boolean(frontierCard&&scroller&&cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12);
-          if(frontierVisible) {
+          const frontierReached=Boolean(frontierCard&&scroller&&(
+            (cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12)||cardRect.bottom<=scrollRect.top+12
+          ));
+          const frontierPassedAtLoadedEnd=Boolean(!frontierCard&&scroller&&scroller.scrollTop>=scroller.scrollHeight-scroller.clientHeight-24&&
+            !cards.some(card=>!inspected.has(card.key)));
+          if(frontierReached||frontierPassedAtLoadedEnd) {
             awaitingResumeFrontier=false;
             state.awaitingResumeFrontier=false;
             state.reloadResumeFrontier="";
             state.message="Última ficha ya alcanzada; contando intentos sin avance desde este punto.";
-            logEvent(state,"info","Se alcanzó la última ficha inspeccionada antes de la recarga; comienza el conteo de avance desde aquí",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cards.length});
+            logEvent(state,"info",frontierReached?"Se alcanzó la última ficha inspeccionada antes de la recarga; comienza el conteo de avance desde aquí":"Se llegó al final de las fichas ya cargadas; comienza el conteo de avance",{frontier:resumeFrontier,frontierReached,frontierPassedAtLoadedEnd,scrollTop:captureResultsPosition().top,visibleCards:cards.length});
             await scheduleCheckpoint(true);
           }
         }
@@ -858,28 +875,18 @@
           const currentCard=selectCards().find(item=>item.key===card.key)||card;
           if (!currentCard.element?.isConnected) continue;
           const add=rowFromCard(currentCard,country,searchUrl);
-          state.message="Abriendo ficha: "+currentCard.name;
+          state.message="Encolando enriquecimiento: "+currentCard.name;
           showOverlay(state.message);
-          let mainTabOpen=null;
-          for(let openAttempt=0;openAttempt<3&&!stopped;openAttempt++) {
-            const freshCard=selectCards().find(item=>item.key===currentCard.key)||currentCard;
-            mainTabOpen=await openBusinessCardAndReturn(freshCard,country,searchUrl,state,"business-scan");
-            if(mainTabOpen.opened||mainTabOpen.restoreFailed)break;
-            await wait(250);
-          }
-          if(!mainTabOpen?.opened) {
-            logEvent(state,"warn","No se pudo abrir la ficha en Maps; sigo con la siguiente ficha",{
-              name:currentCard.name,reason:mainTabOpen?.reason||"unknown",businessUrl:Boolean(add.businessUrl),attempts:3
-            });
-            mainTabOpen={opened:false,details:{}};
-          }
+          const mainTabOpen={opened:false,details:{},skipped:true,reason:"normal-scan-scroll-only"};
+          logEvent(state,"info","Se omite la ficha principal durante el avance normal",{
+            name:currentCard.name,reason:mainTabOpen.reason,businessUrl:Boolean(add.businessUrl),detailTabs:DETAIL_CONCURRENCY
+          });
           inspected.add(currentCard.key);
           if(mainTabOpen.details.phone)add.phone=mainTabOpen.details.phone;
           if(mainTabOpen.details.address){add.address=mainTabOpen.details.address;add.location=utils.locality(add.address);}
           if(mainTabOpen.details.website)add.website=mainTabOpen.details.website;
           if(mainTabOpen.details.rating)add.rating=mainTabOpen.details.rating;
           if(mainTabOpen.details.category)add.category=mainTabOpen.details.category;
-          const restoreSearchAfterCard=Boolean(mainTabOpen.restoreFailed);
           add.whatsappLink=whatsapp(add.phone,country,add.address||add.location,searchUrl);
           if(add.businessUrl){
             state.message=`En cola ${activeDetails+detailQueue.length+1}: ${card.name}`;
@@ -900,30 +907,6 @@
           scheduleCheckpoint();
           showOverlay(`${state.message}\nÚltima: ${card.name}`);
           count++;
-          if(restoreSearchAfterCard) {
-            state.lastReloadRecoveryAt=Date.now();
-            state.reloadResumeFrontier=currentCard.key;
-            state.awaitingResumeFrontier=true;
-            state.message="Maps dejó la búsqueda al abrir una ficha. Guardé el progreso y estoy restaurando la misma búsqueda…";
-            logEvent(state,"warn","Maps no volvió a la lista después de abrir una ficha; se restaurará la misma búsqueda",{
-              name:currentCard.name,searchUrl,
-              urlAfter:mainTabOpen.urlAfter,scrollTop:mainTabOpen.position?.top||0,
-              resumeFrontier:currentCard.key,rows:rows.size,inspected:inspected.size
-            });
-            await scheduleCheckpoint(true);
-            await flushCheckpoint();
-            reloadRequested=true;
-            const result=await chrome.runtime.sendMessage({type:"GLCSV_MAPS_RELOAD_RECOVERY",params:{
-              searchUrl,expectedQuery,limit,country,
-              parallelTabs:DETAIL_CONCURRENCY,campaignId:campaignId||"",
-              campaignQuery:campaignQuery||"",scrollTop:mainTabOpen.position?.top||0
-            }});
-            if(!result?.ok) {
-              reloadRequested=false;
-              throw new Error("No pude restaurar la búsqueda después de abrir «"+currentCard.name+"»: "+(result?.error||"error desconocido"));
-            }
-            return;
-          }
           if(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)
             while(!stopped&&detailQueue.length+activeDetails>=MAX_DETAIL_BACKLOG)await wait(100);
           if (!stopped&&!add.businessUrl) await wait(180);
@@ -933,20 +916,26 @@
         await flushCheckpoint();
         showOverlay(state.message);
         const beforeNoProgress=noProgress;
-        const scroll=await advanceResults(cards);
+        const cardsBeforeScroll=selectCards();
+        const scroll=await advanceResults(cardsBeforeScroll);
         const cardsAfterScroll=selectCards();
         let hasNew=cardsAfterScroll.some(c=>!inspected.has(c.key));
         let reachedFrontierThisScroll=false;
         if(awaitingResumeFrontier) {
           const frontierCard=cardsAfterScroll.find(card=>card.key===resumeFrontier);
           const scroller=getScrollTarget(cardsAfterScroll),cardRect=frontierCard?rect(frontierCard.element):null,scrollRect=scroller?rect(scroller):null;
-          reachedFrontierThisScroll=Boolean(frontierCard&&scroller&&cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12);
+          reachedFrontierThisScroll=Boolean(frontierCard&&scroller&&(
+            (cardRect.bottom>scrollRect.top+12&&cardRect.top<scrollRect.bottom-12)||cardRect.bottom<=scrollRect.top+12
+          ));
+          const frontierPassedAtLoadedEnd=Boolean(!frontierCard&&scroller&&scroller.scrollTop>=scroller.scrollHeight-scroller.clientHeight-24&&
+            !cardsAfterScroll.some(card=>!inspected.has(card.key))&&!hasNew&&!scroll.newResults);
+          if(frontierPassedAtLoadedEnd)reachedFrontierThisScroll=true;
           if(reachedFrontierThisScroll) {
             awaitingResumeFrontier=false;
             state.awaitingResumeFrontier=false;
             state.reloadResumeFrontier="";
             state.message="Última ficha ya alcanzada; contando intentos sin avance desde este punto.";
-            logEvent(state,"info","Se alcanzó la última ficha inspeccionada después de la recarga",{frontier:resumeFrontier,scrollTop:captureResultsPosition().top,visibleCards:cardsAfterScroll.length,noProgressBefore:beforeNoProgress});
+            logEvent(state,"info",frontierPassedAtLoadedEnd?"Se llegó al final de las fichas ya cargadas; comienza el conteo de avance":"Se alcanzó la última ficha inspeccionada después de la recarga",{frontier:resumeFrontier,frontierPassedAtLoadedEnd,scrollTop:captureResultsPosition().top,visibleCards:cardsAfterScroll.length,noProgressBefore:beforeNoProgress});
             await scheduleCheckpoint(true);
           }
         }
@@ -959,10 +948,10 @@
         noProgress=waitingForResumeFrontier?0:endReached||resultsAdvanced?0:noProgress+1;
         if(hasNew||count>0)state.lastReloadRecoveryAt=0;
         let spinnerRecovery=null;
-        if(!endReached&&!stopped&&!hasNew&&noProgress>=3) {
+        if(!endReached&&!stopped&&!hasNew&&noProgress>=MAX_NO_PROGRESS) {
           state.message="Maps no cargó más resultados. Probando fichas anteriores desde la última detectada…";
           showOverlay(state.message);
-          spinnerRecovery=await recoverSpinnerByReopeningPriorCards(inspected,priorCardRecoveryTried,state);
+          spinnerRecovery=await recoverSpinnerByReopeningPriorCards(inspected,priorCardRecoveryTried,state,1);
           const recoveryFresh=selectCards().filter(card=>!inspected.has(card.key));
           logEvent(state,spinnerRecovery.newResults?"info":"warn",spinnerRecovery.newResults?
             "La lista respondió después de reabrir fichas anteriores":
@@ -973,19 +962,22 @@
             });
           if(spinnerRecovery.restoreFailed)throw new Error(`Se abrió «${spinnerRecovery.card}», pero Maps no volvió a la lista de resultados.`);
           if(spinnerRecovery.newResults||recoveryFresh.length) {
-            // Cada resultado nuevo reinicia por completo la secuencia de tres
-            // fichas y desplazamientos, incluso si Maps se vuelve a trabar luego.
+            // Un resultado nuevo reinicia la secuencia de recuperación.
             priorCardRecoveryTried.clear();
             noProgress=0;
             hasNew=true;
-          } else if(!selectCards().length) {
-            // La ausencia temporal del feed tampoco sustituye los ocho
-            // intentos sin avance; el contador sigue su curso normal.
-          } else if(spinnerRecovery.openedCount<3||spinnerRecovery.scrollAttempts<3) {
-            // Solo fichas abiertas y recorridas hasta el final cuentan; las que
-            // no abren se omiten para probar la anterior sin gastar un intento.
-            // Conserva el contador 0/8 para que una lista atascada no quede
-            // atrapada repitiendo la recuperación en 2/8 indefinidamente.
+          } else if(spinnerRecovery.openedCount>0&&spinnerRecovery.scrollAttempts>0) {
+            const morePriorCards=priorCardRecoveryTried.size<inspected.size;
+            if(morePriorCards) {
+              // Cada ciclo abre una ficha anterior y vuelve a desplazar el feed.
+              // Si no aparecen resultados, se hace otro desplazamiento normal
+              // antes de probar la ficha anterior siguiente; no se recarga aquí.
+              noProgress=MAX_NO_PROGRESS-1;
+              logEvent(state,"info","Ficha anterior abierta y feed recorrido sin resultados nuevos; se probará la siguiente después del próximo desplazamiento",{
+                triedPriorCards:priorCardRecoveryTried.size,inspected:inspected.size,
+                openedCount:spinnerRecovery.openedCount,scrollAttempts:spinnerRecovery.scrollAttempts
+              });
+            }
           }
         }
         if(!endReached&&!stopped&&noProgress>=MAX_NO_PROGRESS) {
@@ -1052,7 +1044,7 @@
           endMarkerVisible&&hasNew?`Maps mostró el marcador de fin; procesando ${selectCards().filter(c=>!inspected.has(c.key)).length} fichas ya cargadas…`:
           `Desplazamiento ${scroll.method}: ${rows.size} fichas · ${noProgress}/${MAX_NO_PROGRESS} intentos sin avance`;
         const scrollEvent=endReached?"Fin de resultados confirmado":endMarkerVisible&&hasNew?"Marcador de fin visible; procesando fichas pendientes":"Desplazamiento para cargar más resultados";
-        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cards.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,noProgressResetReason,awaitingResumeFrontier,reachedFrontierThisScroll,endReached,spinnerRecovery,...scroll});
+        logEvent(state,endReached?"info":noProgress?"warn":"info",scrollEvent,{iteration:iterations,visibleCards:cardsBeforeScroll.length,processedThisPass:count,hasUnseenCard:hasNew,endMarkerVisible,noProgressBefore:beforeNoProgress,noProgressAfter:noProgress,noProgressResetReason,awaitingResumeFrontier,reachedFrontierThisScroll,endReached,spinnerRecovery,...scroll});
         state.updatedAt=Date.now();
         scheduleCheckpoint();
         await flushCheckpoint();

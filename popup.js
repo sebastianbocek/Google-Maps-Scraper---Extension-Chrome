@@ -81,7 +81,7 @@
   }
   function rowCsv(row) {
     const link=util.whatsapp(row.phone||"",settings.country||"auto",row.address || rowLocation(row),state.searchUrl,settings.whatsappMessage) || row.whatsappLink || "";
-    return [row.name,row.phone,row.rating,row.category,row.website,link,row.businessUrl||""];
+    return [row.name,row.phone,row.rating,row.category,row.website,row.email||"",link,row.businessUrl||""];
   }
   function csvCell(value) {
     let s=String(value ?? "").replace(/\r?\n/g," ").trim();
@@ -89,7 +89,7 @@
     return '"'+s.replace(/"/g,'""')+'"';
   }
   function buildCsv(items) {
-    const header=["nombre","telefono","rating","categoria","website","whatsapp_link","url_negocio"];
+    const header=["nombre","telefono","rating","categoria","website","email","whatsapp_link","url_negocio"];
     return "\uFEFF"+[header,...items.map(rowCsv)].map(r=>r.map(csvCell).join(",")).join("\r\n")+"\r\n";
   }
   async function downloadCsv(items) {

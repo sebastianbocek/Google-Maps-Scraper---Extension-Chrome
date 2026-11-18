@@ -6,6 +6,7 @@ const CAMPAIGN_LOG_KEY='glcsv_campaign_logs';
 const MAPS_RELOAD_KEY='glcsv_maps_reload_recovery';
 const debuggerWheelTabs=new Set();
 const reloadResumeTabs=new Set();
+const websiteEmailCache=new Map();
 
 chrome.debugger.onDetach.addListener(source=>{
   if(Number.isInteger(source.tabId))debuggerWheelTabs.delete(source.tabId);
@@ -251,6 +252,146 @@ chrome.tabs.onUpdated.addListener((tabId,changeInfo)=>{
   }).catch(()=>{});
 });
 
+function parsePublicWebsiteUrl(value) {
+  const raw=String(value||"").trim();
+  if(!raw||globalThis.GLCSVUtil.isSocialWebsite(raw))return null;
+  try {
+    const parsed=new URL(/^[a-z][a-z\d+.-]*:\/\//i.test(raw)?raw:`https://${raw.replace(/^\/\//,"")}`);
+    const host=parsed.hostname.toLowerCase().replace(/^\[|\]$/g,"");
+    if(!["http:","https:"].includes(parsed.protocol)||parsed.username||parsed.password||
+      !host||host==="localhost"||host.endsWith(".localhost")||host.endsWith(".local")||host.endsWith(".internal")||
+      /^(?:0|10|127|169\.254|192\.168)\./.test(host)||/^172\.(?:1[6-9]|2\d|3[01])\./.test(host)||
+      host.includes(":")||/^(?:fc|fd|fe80):/i.test(host))return null;
+    parsed.hash="";
+    return parsed;
+  } catch {return null;}
+}
+
+function decodeWebsiteText(value) {
+  const codePoint=(raw,radix)=>{const point=parseInt(raw,radix);return point>=0&&point<=0x10ffff?String.fromCodePoint(point):" ";};
+  return String(value||"")
+    .replace(/&commat;|&#0*64;|&#x0*40;/gi,"@")
+    .replace(/&period;|&#0*46;|&#x0*2e;/gi,".")
+    .replace(/&amp;/gi,"&").replace(/&nbsp;|&#0*160;/gi," ")
+    .replace(/&quot;/gi,'"').replace(/&#0*39;|&apos;/gi,"'")
+    .replace(/&#x([\da-f]{1,6});?/gi,(_m,n)=>codePoint(n,16))
+    .replace(/&#(\d{1,7});?/g,(_m,n)=>codePoint(n,10));
+}
+
+function emailsFromWebsiteHtml(html) {
+  const decodedHtml=decodeWebsiteText(html);
+  const mailto=[...decodedHtml.matchAll(/\bmailto:([^"'<>?#\s]+)/gi)].map(match=>{
+    let address=match[1];
+    try{address=decodeURIComponent(address);}catch{}
+    return address.split(/[;?#]/,1)[0];
+  });
+  const cloudflare=[];
+  const encodedEmails=[
+    ...decodedHtml.matchAll(/data-cfemail\s*=\s*["']([a-f\d]+)["']/gi),
+    ...decodedHtml.matchAll(/\/cdn-cgi\/l\/email-protection#([a-f\d]+)/gi)
+  ];
+  for(const match of encodedEmails) {
+    const hex=match[1];
+    if(hex.length<4||hex.length%2)continue;
+    const key=parseInt(hex.slice(0,2),16);
+    let email="";
+    for(let index=2;index<hex.length;index+=2)email+=String.fromCharCode(parseInt(hex.slice(index,index+2),16)^key);
+    if(email.includes("@"))cloudflare.push(email);
+  }
+  const text=decodedHtml
+    .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi," ")
+    .replace(/<[^>]*>/g," ")
+    .replace(/\s*(?:\[|\(|\{)\s*at\s*(?:\]|\)|\})\s*/gi,"@")
+    .replace(/\s*(?:\[|\(|\{)\s*dot\s*(?:\]|\)|\})\s*/gi,".");
+  const matches=[...mailto,...cloudflare,...(text.match(/[a-z0-9_.+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+/gi)||[])];
+  const blocked=new Set(["example.com","domain.com","email.com","yourdomain.com","test.com","wixpress.com","schema.org"]);
+  const emails=new Set();
+  for(const candidate of matches) {
+    const email=candidate.split(/[;,]/,1)[0].replace(/^[.,;:\s]+|[.,;:\s]+$/g,"").toLowerCase();
+    const [local,domain]=email.split("@");
+    if(!/^[a-z0-9_.+-]+@(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(email)||email.length>254||!local||local.length>64||!domain||blocked.has(domain)||
+      /^(?:noreply|no-reply|donotreply|do-not-reply|example|test)(?:[+._-]|$)/i.test(local)||
+      /\.(?:png|jpe?g|gif|svg|webp|css|js|woff2?)$/i.test(domain))continue;
+    emails.add(email);
+  }
+  return [...emails];
+}
+
+function contactPageUrls(html,pageUrl) {
+  const candidates=[];
+  for(const match of String(html||"").matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)) {
+    const tag=match[0];
+    const href=tag.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2];
+    if(!href||/^mailto:|^tel:|^javascript:/i.test(href))continue;
+    const label=decodeWebsiteText(tag.replace(/<[^>]*>/g," "));
+    if(!/(?:contact|cont[aá]ct|contato|contatt|kontakt|nosotros|sobre|about|support|empresa|equipo|team|impressum|imprint|legal|atenci[oó]n|atendimento)/i.test(`${href} ${label}`))continue;
+    try {
+      const target=new URL(decodeWebsiteText(href),pageUrl);
+      if(!/^https?:$/.test(target.protocol)||target.hostname.toLowerCase().replace(/^www\./,"")!==pageUrl.hostname.toLowerCase().replace(/^www\./,""))continue;
+      target.hash="";
+      if(!candidates.includes(target.href))candidates.push(target.href);
+    } catch {}
+    if(candidates.length>=3)break;
+  }
+  return candidates;
+}
+
+async function fetchWebsiteHtml(url,timeoutMs=7000) {
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),timeoutMs);
+  try {
+    const response=await fetch(url.href,{redirect:"follow",credentials:"omit",signal:controller.signal,headers:{Accept:"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1"}});
+    const finalUrl=parsePublicWebsiteUrl(response.url);
+    const sameSiteHost=finalUrl&&finalUrl.hostname.toLowerCase().replace(/^www\./,"")===url.hostname.toLowerCase().replace(/^www\./,"");
+    if(!response.ok||!finalUrl||!sameSiteHost)return {html:"",url};
+    const type=response.headers.get("content-type")||"";
+    if(type&&!/(?:text\/html|application\/xhtml\+xml|text\/plain)/i.test(type))return {html:"",url:finalUrl};
+    const html=(await response.text()).slice(0,1_500_000);
+    return {html,url:finalUrl};
+  } catch {return {html:"",url};}
+  finally {clearTimeout(timeout);}
+}
+
+async function findWebsiteEmail(website) {
+  const start=parsePublicWebsiteUrl(website);
+  if(!start)return "";
+  const cacheKey=start.href.replace(/\/$/,"").toLowerCase();
+  if(websiteEmailCache.has(cacheKey))return websiteEmailCache.get(cacheKey);
+  const lookup=(async()=>{
+    let home=await fetchWebsiteHtml(start);
+    if(!home.html&&start.protocol==="https:") {
+      const httpStart=new URL(start.href);httpStart.protocol="http:";
+      home=await fetchWebsiteHtml(httpStart);
+    }
+    const pageUrls=[home.url.href];
+    const siteRoot=new URL("/",home.url);
+    const commonPaths=["/contact","/about","/support","/contact-us","/contacts","/contacto","/contato","/nosotros"];
+    for(const path of commonPaths) {
+      const url=new URL(path,siteRoot).href;
+      if(!pageUrls.includes(url))pageUrls.push(url);
+    }
+    for(const url of contactPageUrls(home.html,home.url).slice(0,3))if(!pageUrls.includes(url))pageUrls.push(url);
+
+    const emails=new Set(emailsFromWebsiteHtml(home.html));
+    const pages=pageUrls.slice(1);
+    for(let index=0;index<pages.length;index+=3) {
+      const results=await Promise.all(pages.slice(index,index+3).map(url=>fetchWebsiteHtml(new URL(url),5000)));
+      for(const result of results)for(const email of emailsFromWebsiteHtml(result.html))emails.add(email);
+    }
+    return [...emails].sort().join(", ");
+  })();
+  if(websiteEmailCache.size>=500)websiteEmailCache.delete(websiteEmailCache.keys().next().value);
+  websiteEmailCache.set(cacheKey,lookup);
+  try {
+    const emails=await lookup;
+    websiteEmailCache.set(cacheKey,emails);
+    return emails;
+  } catch {
+    websiteEmailCache.delete(cacheKey);
+    return "";
+  }
+}
+
 async function enrichPlaceInWorkerTab(row) {
   const url=String(row?.businessUrl||'');
   let parsed;
@@ -268,7 +409,9 @@ async function enrichPlaceInWorkerTab(row) {
       await chrome.scripting.executeScript({target:{tabId},files:['data_utils.js','content.js']});
       const result=await chrome.tabs.sendMessage(tabId,{type:'GLCSV_DETAIL_EXTRACT',row});
       if(!result?.ok)throw new Error(result?.error||'No se pudieron leer los datos de la ficha.');
-      return result.row;
+      const enriched={...result.row,email:String(result.row?.email||"")};
+      if(enriched.website&&!enriched.email)enriched.email=await findWebsiteEmail(enriched.website);
+      return enriched;
     } catch(error) {
       lastError=error;
     } finally {

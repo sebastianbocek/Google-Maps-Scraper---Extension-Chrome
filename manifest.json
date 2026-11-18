@@ -29,6 +29,8 @@
     "debugger"
   ],
   "host_permissions": [
+    "https://*/*",
+    "http://*/*",
     "https://*.google.com/*",
     "https://*.google.com.ar/*",
     "https://*.google.com.br/*",
